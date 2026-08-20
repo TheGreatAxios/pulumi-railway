@@ -1,12 +1,8 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "noEmit": true,
-    "paths": {
-      "@thegreataxios/pulumi-railway": ["../../sdk/nodejs/index.ts"]
-    },
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2022"
