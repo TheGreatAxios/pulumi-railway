@@ -55,8 +55,9 @@ package-nodejs: nodejs-build
 	npm pack "$(ROOT_DIR)/sdk/nodejs/bin" --pack-destination "$(DIST_DIR)"
 	test -f "$(NODEJS_TARBALL)"
 
-example: nodejs-build
-	./sdk/nodejs/node_modules/.bin/tsc --noEmit --project examples/simple/tsconfig.json
+example: package-nodejs
+	cd examples/simple && npm install --ignore-scripts --no-package-lock
+	cd examples/simple && npx tsc --noEmit
 
 test:
 	cd provider && go test -race ./...
