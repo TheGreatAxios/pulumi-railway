@@ -87,7 +87,10 @@ func (*Volume) Create(
 		return infer.CreateResponse[VolumeState]{ID: req.Name, Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.CreateResponse[VolumeState]{}, err
+	}
 
 	var result struct {
 		VolumeCreate struct {
@@ -157,7 +160,10 @@ func (*Volume) Read(
 		}
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.ReadResponse[VolumeArgs, VolumeState]{}, err
+	}
 	volumeName, volumeFound, err := findProjectVolume(ctx, client, inputs.ProjectID, volumeID)
 	if err != nil {
 		if isNotFound(err) {
@@ -417,7 +423,10 @@ func (*Volume) Update(
 		return infer.UpdateResponse[VolumeState]{Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.UpdateResponse[VolumeState]{}, err
+	}
 
 	// Update volume name
 	if !equalPointers(state.Name, input.Name) {
@@ -448,7 +457,10 @@ func (*Volume) Update(
 func (*Volume) Delete(
 	ctx context.Context, req infer.DeleteRequest[VolumeState],
 ) (infer.DeleteResponse, error) {
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.DeleteResponse{}, err
+	}
 
 	mutation := `mutation volumeDelete($volumeId: String!) { volumeDelete(volumeId: $volumeId) }`
 

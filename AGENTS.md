@@ -34,6 +34,10 @@ Native Pulumi provider for [Railway](https://railway.com), written in Go on
   field means implementing it in `Update`; adding an immutable one means
   adding the tag.
 - Unknown/computed inputs must pass `Check` — previews send unknowns.
+- `ProviderConfig.Configure` must keep a value receiver. pulumi-go-provider
+  asserts the config value against `CustomConfigure`; a pointer receiver
+  silently never runs and CRUD proceeds without a client. The shared API
+  client lives in the credential-keyed `clientCache`, not on the config.
 - Never commit tokens or Railway project/environment IDs belonging to a real
   account. Tests use httptest mocks; examples use placeholders.
 

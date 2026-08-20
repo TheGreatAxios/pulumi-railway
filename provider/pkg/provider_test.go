@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	provider "github.com/pulumi/pulumi-go-provider"
+	"github.com/pulumi/pulumi/sdk/v3/go/property"
 )
 
 func TestProviderConfigRequiresExactlyOneToken(t *testing.T) {
@@ -33,13 +34,75 @@ func TestProviderConfigRequiresExactlyOneToken(t *testing.T) {
 			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
 				t.Fatalf("error = %v, want containing %q", err, test.wantErr)
 			}
-			if test.wantErr == "" && test.config.client == nil {
+			if test.wantErr != "" {
+				return
+			}
+			client, err := test.config.apiClient()
+			if err != nil {
+				t.Fatalf("apiClient after Configure: %v", err)
+			}
+			if client == nil {
 				t.Fatal("Configure did not initialize the shared API client")
 			}
-			if test.wantErr == "" && strings.TrimSpace(test.config.client.token) != test.config.client.token {
-				t.Fatalf("client token was not trimmed: %q", test.config.client.token)
+			if strings.TrimSpace(client.token) != client.token {
+				t.Fatalf("client token was not trimmed: %q", client.token)
 			}
 		})
+	}
+}
+
+func TestAPIClientIsSharedPerCredential(t *testing.T) {
+	t.Parallel()
+	first, err := ProviderConfig{Token: "cache-test-alpha"}.apiClient()
+	if err != nil {
+		t.Fatalf("apiClient: %v", err)
+	}
+	again, err := ProviderConfig{Token: " cache-test-alpha "}.apiClient() //nolint:gosec // fake test credential
+	if err != nil {
+		t.Fatalf("apiClient with untrimmed token: %v", err)
+	}
+	if first != again {
+		t.Error("expected one shared client per credential")
+	}
+	other, err := ProviderConfig{ProjectToken: "cache-test-beta"}.apiClient()
+	if err != nil {
+		t.Fatalf("apiClient for project token: %v", err)
+	}
+	if other == first {
+		t.Error("distinct credentials must not share a client")
+	}
+}
+
+// Regression test: pulumi-go-provider asserts the config VALUE against
+// CustomConfigure, so a pointer-receiver Configure would never run and
+// resource CRUD would proceed without a configured client.
+func TestFrameworkConfigureRunsProviderValidation(t *testing.T) {
+	t.Parallel()
+	railwayProvider, err := BuildProvider()
+	if err != nil {
+		t.Fatalf("build provider: %v", err)
+	}
+	err = railwayProvider.Configure(t.Context(), provider.ConfigureRequest{
+		Args: property.NewMap(map[string]property.Value{
+			"token":        property.New("framework-account-token"),
+			"projectToken": property.New("framework-project-token"),
+		}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "configure only one") {
+		t.Fatalf("Configure error = %v, want the exactly-one-token validation", err)
+	}
+	// A provider instance is configured once per process; use a fresh one
+	// because the framework decodes into a retained config struct.
+	freshProvider, err := BuildProvider()
+	if err != nil {
+		t.Fatalf("build fresh provider: %v", err)
+	}
+	if err := freshProvider.Configure(t.Context(), provider.ConfigureRequest{
+		Args: property.NewMap(map[string]property.Value{
+			"token": property.New("framework-account-token"),
+		}),
+	}); err != nil {
+		t.Fatalf("Configure with a single token: %v", err)
 	}
 }
 

@@ -76,7 +76,10 @@ func (*Project) Create(
 		return infer.CreateResponse[ProjectState]{ID: req.Name, Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.CreateResponse[ProjectState]{}, err
+	}
 
 	var result struct {
 		ProjectCreate struct {
@@ -116,7 +119,10 @@ func (*Project) Read(
 	ctx context.Context, req infer.ReadRequest[ProjectArgs, ProjectState],
 ) (infer.ReadResponse[ProjectArgs, ProjectState], error) {
 	state := req.State
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.ReadResponse[ProjectArgs, ProjectState]{}, err
+	}
 
 	var result struct {
 		Project struct {
@@ -165,7 +171,10 @@ func (*Project) Update(
 		return infer.UpdateResponse[ProjectState]{Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.UpdateResponse[ProjectState]{}, err
+	}
 
 	mutation := `mutation projectUpdate($id: String!, $input: ProjectUpdateInput!) {
   projectUpdate(id: $id, input: $input) { id name }
@@ -190,7 +199,10 @@ func (*Project) Update(
 func (*Project) Delete(
 	ctx context.Context, req infer.DeleteRequest[ProjectState],
 ) (infer.DeleteResponse, error) {
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.DeleteResponse{}, err
+	}
 
 	mutation := `mutation projectDelete($id: String!) { projectDelete(id: $id) }`
 

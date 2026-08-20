@@ -139,7 +139,10 @@ func (*Service) Create(
 		return infer.CreateResponse[ServiceState]{ID: req.Name, Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.CreateResponse[ServiceState]{}, err
+	}
 
 	// 1. Create the service
 	var createResult struct {
@@ -217,7 +220,10 @@ func (*Service) Read(
 	ctx context.Context, req infer.ReadRequest[ServiceArgs, ServiceState],
 ) (infer.ReadResponse[ServiceArgs, ServiceState], error) {
 	state := req.State
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.ReadResponse[ServiceArgs, ServiceState]{}, err
+	}
 	serviceID := req.ID
 	inputs := req.Inputs
 	if strings.Contains(req.ID, "/") {
@@ -320,7 +326,10 @@ func (*Service) Update(
 		return infer.UpdateResponse[ServiceState]{Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.UpdateResponse[ServiceState]{}, err
+	}
 
 	// Update service name if changed
 	if input.Name != state.Name {
@@ -348,7 +357,10 @@ func (*Service) Update(
 func (*Service) Delete(
 	ctx context.Context, req infer.DeleteRequest[ServiceState],
 ) (infer.DeleteResponse, error) {
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.DeleteResponse{}, err
+	}
 
 	mutation := `mutation serviceDelete($id: String!) { serviceDelete(id: $id) }`
 

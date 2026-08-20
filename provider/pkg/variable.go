@@ -92,7 +92,10 @@ func (*Variable) Create(
 		return infer.CreateResponse[VariableState]{ID: req.Name, Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.CreateResponse[VariableState]{}, err
+	}
 	compositeID := fmt.Sprintf("%s/%s/%s/%s", input.ProjectID, input.EnvironmentID, deref(input.ServiceID), input.Key)
 	existing, err := readVariables(ctx, client, input)
 	if err != nil {
@@ -139,7 +142,10 @@ func (*Variable) Read(
 		}
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.ReadResponse[VariableArgs, VariableState]{}, err
+	}
 	variables, err := readVariables(ctx, client, inputs)
 	if err != nil {
 		if isNotFound(err) {
@@ -166,7 +172,10 @@ func (*Variable) Update(
 		return infer.UpdateResponse[VariableState]{Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.UpdateResponse[VariableState]{}, err
+	}
 
 	mutation := `mutation variableUpsert($input: VariableUpsertInput!) {
   variableUpsert(input: $input)
@@ -193,7 +202,10 @@ func (*Variable) Update(
 func (*Variable) Delete(
 	ctx context.Context, req infer.DeleteRequest[VariableState],
 ) (infer.DeleteResponse, error) {
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.DeleteResponse{}, err
+	}
 
 	mutation := `mutation variableDelete($input: VariableDeleteInput!) {
   variableDelete(input: $input)

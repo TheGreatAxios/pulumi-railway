@@ -102,7 +102,10 @@ func (*CustomDomainResource) Create(
 		return infer.CreateResponse[CustomDomainState]{ID: req.Name, Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.CreateResponse[CustomDomainState]{}, err
+	}
 
 	var result struct {
 		CustomDomainCreate struct {
@@ -161,7 +164,10 @@ func (*CustomDomainResource) Read(
 	ctx context.Context, req infer.ReadRequest[CustomDomainArgs, CustomDomainState],
 ) (infer.ReadResponse[CustomDomainArgs, CustomDomainState], error) {
 	state := req.State
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.ReadResponse[CustomDomainArgs, CustomDomainState]{}, err
+	}
 	domainID := req.ID
 	inputs := req.Inputs
 	if strings.Contains(req.ID, "/") {
@@ -252,7 +258,10 @@ func (*CustomDomainResource) Update(
 		return infer.UpdateResponse[CustomDomainState]{Output: state}, nil
 	}
 
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.UpdateResponse[CustomDomainState]{}, err
+	}
 
 	if !equalPointers(state.TargetPort, input.TargetPort) {
 		mutation := `mutation customDomainUpdate($id: String!, $environmentId: String!, $targetPort: Int) {
@@ -279,7 +288,10 @@ func (*CustomDomainResource) Update(
 func (*CustomDomainResource) Delete(
 	ctx context.Context, req infer.DeleteRequest[CustomDomainState],
 ) (infer.DeleteResponse, error) {
-	client := getClient(ctx)
+	client, err := getClient(ctx)
+	if err != nil {
+		return infer.DeleteResponse{}, err
+	}
 
 	mutation := `mutation customDomainDelete($id: String!) { customDomainDelete(id: $id) }`
 

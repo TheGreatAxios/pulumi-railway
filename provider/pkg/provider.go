@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 
 	provider "github.com/pulumi/pulumi-go-provider"
 	"github.com/pulumi/pulumi-go-provider/infer"
@@ -17,7 +18,6 @@ type ProviderConfig struct {
 	Token string `pulumi:"token,optional" provider:"secret"`
 	// Railway project token.
 	ProjectToken string `pulumi:"projectToken,optional" provider:"secret"`
-	client       *Client
 }
 
 func (c *ProviderConfig) Annotate(a infer.Annotator) {
@@ -28,35 +28,68 @@ func (c *ProviderConfig) Annotate(a infer.Annotator) {
 	a.SetDefault(&c.ProjectToken, nil, "RAILWAY_TOKEN")
 }
 
-func (c *ProviderConfig) Configure(context.Context) error {
-	c.Token = strings.TrimSpace(c.Token)
-	c.ProjectToken = strings.TrimSpace(c.ProjectToken)
-	hasAccountToken := c.Token != ""
-	hasProjectToken := c.ProjectToken != ""
-	switch {
-	case hasAccountToken && hasProjectToken:
-		return errors.New("configure only one of railway:token or railway:projectToken")
-	case !hasAccountToken && !hasProjectToken:
-		return errors.New("configure railway:token or railway:projectToken")
-	case hasProjectToken:
-		c.client = NewProjectClient(c.ProjectToken)
-	default:
-		c.client = NewClient(c.Token)
+// Configure validates credentials and pre-warms the shared API client. It
+// must keep a value receiver: pulumi-go-provider asserts the config VALUE
+// against CustomConfigure, so a pointer receiver silently never runs.
+func (c ProviderConfig) Configure(context.Context) error {
+	_, err := c.apiClient()
+	return err
+}
+
+type authKey struct {
+	token        string
+	projectToken string
+}
+
+func (c ProviderConfig) authKey() authKey {
+	return authKey{
+		token:        strings.TrimSpace(c.Token),
+		projectToken: strings.TrimSpace(c.ProjectToken),
 	}
-	return nil
+}
+
+// clientCache memoizes one API client per credential so every RPC shares a
+// single HTTP client (connection pooling, retry behavior) instead of building
+// one per call. pulumi-go-provider hands out config copies, so the client
+// cannot live on ProviderConfig itself.
+var clientCache sync.Map // map[authKey]*Client
+
+func (c ProviderConfig) newClient() (*Client, error) {
+	key := c.authKey()
+	switch {
+	case key.token != "" && key.projectToken != "":
+		return nil, errors.New("configure only one of railway:token or railway:projectToken")
+	case key.token == "" && key.projectToken == "":
+		return nil, errors.New("configure railway:token or railway:projectToken")
+	case key.projectToken != "":
+		return NewProjectClient(key.projectToken), nil
+	default:
+		return NewClient(key.token), nil
+	}
+}
+
+func (c ProviderConfig) apiClient() (*Client, error) {
+	key := c.authKey()
+	if cached, ok := clientCache.Load(key); ok {
+		return cached.(*Client), nil
+	}
+	client, err := c.newClient()
+	if err != nil {
+		return nil, err
+	}
+	cached, _ := clientCache.LoadOrStore(key, client)
+	return cached.(*Client), nil
 }
 
 type clientContextKey struct{}
 
-func getClient(ctx context.Context) *Client {
+// getClient resolves the shared API client: an explicitly injected client in
+// tests, otherwise the memoized client for the hydrated provider config.
+func getClient(ctx context.Context) (*Client, error) {
 	if client, ok := ctx.Value(clientContextKey{}).(*Client); ok {
-		return client
+		return client, nil
 	}
-	cfg := infer.GetConfig[ProviderConfig](ctx)
-	if cfg.client == nil {
-		panic("Railway provider used before Configure initialized its API client")
-	}
-	return cfg.client
+	return infer.GetConfig[ProviderConfig](ctx).apiClient()
 }
 
 func contextWithClient(ctx context.Context, client *Client) context.Context {
