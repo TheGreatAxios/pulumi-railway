@@ -14,6 +14,11 @@ const outputPackagePath = resolve(outputDirectory, "package.json");
 const packageJson = JSON.parse(await readFile(sourcePackagePath, "utf8"));
 
 packageJson.version = version;
+// The Pulumi engine reads pulumi.version to resolve the plugin binary, so it
+// must match the release version exactly.
+if (packageJson.pulumi) {
+  packageJson.pulumi.version = version;
+}
 packageJson.main = "index.js";
 packageJson.types = "index.d.ts";
 packageJson.author = "Sawyer Cutler";

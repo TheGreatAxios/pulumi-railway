@@ -15,9 +15,11 @@ Native Pulumi provider for [Railway](https://railway.com), written in Go on
 - `sdk/nodejs/` — **generated**, never hand-edit (`make sdk` overwrites it,
   including `package.json`). Package metadata comes from
   `provider/pkg/provider.go` (`WithLanguageMap` nodejs block) plus
-  `scripts/prepare-node-package.mjs`, which injects author/bugs/engines at
-  pack time. The single committed lockfile is `sdk/nodejs/package-lock.json`
-  (`make nodejs-lock` refreshes it).
+  `scripts/prepare-node-package.mjs`, which injects author/bugs/engines and
+  the real version at pack time. The committed `package.json` keeps the
+  `0.0.0-dev` placeholder version (the `sdk` target normalizes it) so
+  `check-generated` is stable across release versions. The single committed
+  lockfile is `sdk/nodejs/package-lock.json` (`make nodejs-lock` refreshes it).
 - `examples/simple/` — smoke-test stack (local SDK via `file:` dep).
 - `.github/workflows/` — `ci.yml` on PRs, `release.yml` on semantic `v*.*.*` tags
   (GoReleaser archives), `publish-npm.yml` manual dispatch to publish the npm

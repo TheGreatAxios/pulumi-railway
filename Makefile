@@ -28,6 +28,9 @@ sdk: schema
 	if test -f "$$lock"; then cp "$$lock" "$$tmp"; fi; \
 	trap 'rm -f "$$tmp"' EXIT; \
 	pulumi package gen-sdk --language nodejs --version "$(VERSION)" --out sdk schema.json; \
+	jq --indent 4 '.version = "0.0.0-dev" | .pulumi.version = "0.0.0-dev"' \
+		"$(ROOT_DIR)/sdk/nodejs/package.json" > "$(ROOT_DIR)/sdk/nodejs/package.json.tmp"; \
+	mv "$(ROOT_DIR)/sdk/nodejs/package.json.tmp" "$(ROOT_DIR)/sdk/nodejs/package.json"; \
 	if test -f "$$tmp"; then \
 		mv "$$tmp" "$$lock"; \
 	else \
@@ -41,6 +44,8 @@ check-generated: generate
 
 nodejs-lock: schema
 	pulumi package gen-sdk --language nodejs --version "$(VERSION)" --out sdk schema.json
+	jq --indent 4 '.version = "0.0.0-dev" | .pulumi.version = "0.0.0-dev"' sdk/nodejs/package.json > sdk/nodejs/package.json.tmp
+	mv sdk/nodejs/package.json.tmp sdk/nodejs/package.json
 	cd sdk/nodejs && npm install --package-lock-only --ignore-scripts
 
 nodejs-install: sdk
