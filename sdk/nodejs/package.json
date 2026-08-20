@@ -1,0 +1,32 @@
+{
+    "name": "@thegreataxios/pulumi-railway",
+    "version": "0.0.0-dev",
+    "description": "Native Pulumi provider for Railway: projects, services, variables, custom domains, and volumes",
+    "keywords": [
+        "pulumi",
+        "pulumi-provider",
+        "railway",
+        "infrastructure-as-code",
+        "iac",
+        "cloud"
+    ],
+    "homepage": "https://github.com/thegreataxios/pulumi-railway",
+    "repository": "https://github.com/thegreataxios/pulumi-railway",
+    "license": "MIT",
+    "scripts": {
+        "build": "tsc"
+    },
+    "dependencies": {
+        "@pulumi/pulumi": "^3.142.0"
+    },
+    "devDependencies": {
+        "@types/node": "^20",
+        "typescript": "^5.9.2"
+    },
+    "pulumi": {
+        "resource": true,
+        "name": "railway",
+        "version": "0.0.0-dev",
+        "server": "github://api.github.com/thegreataxios/pulumi-railway"
+    }
+}

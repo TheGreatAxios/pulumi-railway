@@ -1,0 +1,15 @@
+.DS_Store
+.idea/
+.vscode/
+/bin/
+/dist/
+/provider/pulumi-resource-railway
+/provider/coverage.out
+/sdk/nodejs/bin/
+/sdk/nodejs/node_modules/
+/examples/simple/node_modules/
+/examples/simple/package-lock.json
+Pulumi.*.yaml
+coverage.out
+*.exe
+*.tmp

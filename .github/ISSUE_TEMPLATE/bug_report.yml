@@ -1,0 +1,34 @@
+name: Bug report
+description: Report incorrect provider behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include tokens or Pulumi state files.
+  - type: input
+    id: version
+    attributes:
+      label: Provider version
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Pulumi output
+      description: Redact tokens, project IDs, and other sensitive data.
+      render: shell

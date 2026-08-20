@@ -1,0 +1,40 @@
+version: 2
+
+project_name: pulumi-resource-railway
+
+builds:
+  - id: railway
+    dir: provider
+    main: ./cmd/pulumi-resource-railway
+    binary: pulumi-resource-railway
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/thegreataxios/pulumi-railway/provider/pkg/version.Version={{.Version}}
+
+archives:
+  - id: railway
+    ids:
+      - railway
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

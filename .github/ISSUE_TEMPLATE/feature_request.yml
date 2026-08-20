@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest a provider capability or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What Railway workflow is difficult or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: Railway API details
+      description: Include public documentation or redacted GraphQL shapes if available.

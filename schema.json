@@ -1,0 +1,555 @@
+{
+  "name": "railway",
+  "displayName": "Railway",
+  "description": "A Pulumi native provider for managing Railway infrastructure.",
+  "keywords": [
+    "pulumi",
+    "pulumi-provider",
+    "railway",
+    "infrastructure-as-code",
+    "iac",
+    "cloud"
+  ],
+  "homepage": "https://github.com/thegreataxios/pulumi-railway",
+  "license": "MIT",
+  "repository": "https://github.com/thegreataxios/pulumi-railway",
+  "pluginDownloadURL": "github://api.github.com/thegreataxios/pulumi-railway",
+  "publisher": "thegreataxios",
+  "namespace": "thegreataxios",
+  "language": {
+    "csharp": {
+      "respectSchemaVersion": true
+    },
+    "go": {
+      "generateResourceContainerTypes": true,
+      "importBasePath": "github.com/thegreataxios/pulumi-railway/sdk/go/railway",
+      "respectSchemaVersion": true
+    },
+    "nodejs": {
+      "dependencies": {
+        "@pulumi/pulumi": "^3.142.0"
+      },
+      "packageDescription": "Native Pulumi provider for Railway: projects, services, variables, custom domains, and volumes",
+      "packageName": "@thegreataxios/pulumi-railway",
+      "respectSchemaVersion": true,
+      "typescriptVersion": "^5.9.2"
+    },
+    "python": {
+      "pyproject": {
+        "enabled": true
+      },
+      "respectSchemaVersion": true
+    }
+  },
+  "config": {
+    "variables": {
+      "projectToken": {
+        "type": "string",
+        "description": "Railway project token.",
+        "defaultInfo": {
+          "environment": [
+            "RAILWAY_TOKEN"
+          ]
+        },
+        "secret": true
+      },
+      "token": {
+        "type": "string",
+        "description": "Railway account or workspace API token.",
+        "defaultInfo": {
+          "environment": [
+            "RAILWAY_API_TOKEN"
+          ]
+        },
+        "secret": true
+      }
+    }
+  },
+  "provider": {
+    "description": "Configuration for authenticating with the Railway API.",
+    "properties": {
+      "projectToken": {
+        "type": "string",
+        "description": "Railway project token.",
+        "defaultInfo": {
+          "environment": [
+            "RAILWAY_TOKEN"
+          ]
+        },
+        "secret": true
+      },
+      "token": {
+        "type": "string",
+        "description": "Railway account or workspace API token.",
+        "defaultInfo": {
+          "environment": [
+            "RAILWAY_API_TOKEN"
+          ]
+        },
+        "secret": true
+      }
+    },
+    "inputProperties": {
+      "projectToken": {
+        "type": "string",
+        "description": "Railway project token.",
+        "defaultInfo": {
+          "environment": [
+            "RAILWAY_TOKEN"
+          ]
+        },
+        "secret": true
+      },
+      "token": {
+        "type": "string",
+        "description": "Railway account or workspace API token.",
+        "defaultInfo": {
+          "environment": [
+            "RAILWAY_API_TOKEN"
+          ]
+        },
+        "secret": true
+      }
+    }
+  },
+  "resources": {
+    "railway:index:CustomDomain": {
+      "description": "A custom domain attached to a Railway service instance.",
+      "properties": {
+        "certificateStatus": {
+          "type": "string",
+          "description": "Current Railway TLS certificate status."
+        },
+        "cnameTarget": {
+          "type": "string",
+          "description": "DNS CNAME value required by Railway."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Custom domain hostname.",
+          "replaceOnChanges": true
+        },
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the Railway environment where the domain is attached.",
+          "replaceOnChanges": true
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the domain.",
+          "replaceOnChanges": true
+        },
+        "railwayId": {
+          "type": "string",
+          "description": "Railway custom domain ID."
+        },
+        "serviceId": {
+          "type": "string",
+          "description": "ID of the Railway service where the domain is attached.",
+          "replaceOnChanges": true
+        },
+        "targetPort": {
+          "type": "integer",
+          "description": "Optional container port to which Railway routes domain traffic."
+        },
+        "verificationToken": {
+          "type": "string",
+          "description": "Token used to verify domain ownership."
+        }
+      },
+      "required": [
+        "projectId",
+        "environmentId",
+        "serviceId",
+        "domain",
+        "railwayId"
+      ],
+      "inputProperties": {
+        "domain": {
+          "type": "string",
+          "description": "Hostname without a scheme, path, or port, for example api.example.com.",
+          "replaceOnChanges": true
+        },
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the Railway environment where the domain is attached.",
+          "replaceOnChanges": true
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the domain.",
+          "replaceOnChanges": true
+        },
+        "serviceId": {
+          "type": "string",
+          "description": "ID of the Railway service where the domain is attached.",
+          "replaceOnChanges": true
+        },
+        "targetPort": {
+          "type": "integer",
+          "description": "Optional container port to which Railway routes domain traffic."
+        }
+      },
+      "requiredInputs": [
+        "projectId",
+        "environmentId",
+        "serviceId",
+        "domain"
+      ],
+      "aliases": [
+        {
+          "type": "railway:pkg:CustomDomains"
+        },
+        {
+          "type": "railway:pkg:CustomDomain"
+        }
+      ]
+    },
+    "railway:index:Project": {
+      "description": "A Railway project, the top-level container for services and environments.",
+      "properties": {
+        "defaultEnvironmentId": {
+          "type": "string",
+          "description": "ID of the project's primary environment, typically production."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional project description."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the project."
+        },
+        "railwayId": {
+          "type": "string",
+          "description": "Immutable Railway project ID."
+        },
+        "workspaceId": {
+          "type": "string",
+          "description": "Workspace ID that contains the project.",
+          "replaceOnChanges": true
+        }
+      },
+      "required": [
+        "name",
+        "railwayId",
+        "defaultEnvironmentId"
+      ],
+      "inputProperties": {
+        "description": {
+          "type": "string",
+          "description": "Optional project description."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the project."
+        },
+        "workspaceId": {
+          "type": "string",
+          "description": "Workspace ID in which to create the project. Projects without one are temporary and expire after 24 hours unless claimed.",
+          "replaceOnChanges": true
+        }
+      },
+      "requiredInputs": [
+        "name"
+      ],
+      "aliases": [
+        {
+          "type": "railway:pkg:Project"
+        }
+      ]
+    },
+    "railway:index:Service": {
+      "description": "A Railway service and its configuration in one environment.",
+      "properties": {
+        "branch": {
+          "type": "string",
+          "description": "GitHub branch deployed by the service.",
+          "replaceOnChanges": true
+        },
+        "buildCommand": {
+          "type": "string",
+          "description": "Command Railway runs to build the service."
+        },
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the configured environment.",
+          "replaceOnChanges": true
+        },
+        "healthcheckPath": {
+          "type": "string",
+          "description": "HTTP path Railway uses for health checks."
+        },
+        "image": {
+          "type": "string",
+          "description": "Docker image source.",
+          "replaceOnChanges": true
+        },
+        "instanceId": {
+          "type": "string",
+          "description": "Railway service instance ID for the configured environment."
+        },
+        "name": {
+          "type": "string",
+          "description": "Service name shown in Railway."
+        },
+        "numReplicas": {
+          "type": "integer",
+          "description": "Number of service replicas."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the service.",
+          "replaceOnChanges": true
+        },
+        "railwayId": {
+          "type": "string",
+          "description": "Immutable Railway service ID."
+        },
+        "region": {
+          "type": "string",
+          "description": "Railway region for the service instance."
+        },
+        "repo": {
+          "type": "string",
+          "description": "GitHub repository source.",
+          "replaceOnChanges": true
+        },
+        "rootDirectory": {
+          "type": "string",
+          "description": "Root directory used as the build context."
+        },
+        "startCommand": {
+          "type": "string",
+          "description": "Command Railway runs to start the service."
+        }
+      },
+      "required": [
+        "projectId",
+        "environmentId",
+        "name",
+        "railwayId",
+        "instanceId"
+      ],
+      "inputProperties": {
+        "branch": {
+          "type": "string",
+          "description": "GitHub branch to deploy. Valid only when repo is set.",
+          "replaceOnChanges": true
+        },
+        "buildCommand": {
+          "type": "string",
+          "description": "Command Railway runs to build the service."
+        },
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the environment whose service instance is configured.",
+          "replaceOnChanges": true
+        },
+        "healthcheckPath": {
+          "type": "string",
+          "description": "HTTP path Railway uses for health checks."
+        },
+        "image": {
+          "type": "string",
+          "description": "Docker image source, for example redis:7-alpine. Mutually exclusive with repo.",
+          "replaceOnChanges": true
+        },
+        "name": {
+          "type": "string",
+          "description": "Service name shown in Railway."
+        },
+        "numReplicas": {
+          "type": "integer",
+          "description": "Number of service replicas. Must be at least one."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the service.",
+          "replaceOnChanges": true
+        },
+        "region": {
+          "type": "string",
+          "description": "Railway region for the service instance."
+        },
+        "repo": {
+          "type": "string",
+          "description": "GitHub repository source in owner/repository form. Mutually exclusive with image.",
+          "replaceOnChanges": true
+        },
+        "rootDirectory": {
+          "type": "string",
+          "description": "Root directory used as the build context."
+        },
+        "startCommand": {
+          "type": "string",
+          "description": "Command Railway runs to start the service."
+        }
+      },
+      "requiredInputs": [
+        "projectId",
+        "environmentId",
+        "name"
+      ],
+      "aliases": [
+        {
+          "type": "railway:pkg:Service"
+        }
+      ]
+    },
+    "railway:index:Variable": {
+      "description": "A service-scoped or environment-shared Railway variable.",
+      "properties": {
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the Railway environment that owns the variable.",
+          "replaceOnChanges": true
+        },
+        "key": {
+          "type": "string",
+          "description": "Variable name.",
+          "replaceOnChanges": true
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the variable.",
+          "replaceOnChanges": true
+        },
+        "railwayId": {
+          "type": "string",
+          "description": "Composite identifier in projectId/environmentId/serviceId/key form."
+        },
+        "serviceId": {
+          "type": "string",
+          "description": "Optional service ID, unset for an environment-shared variable.",
+          "replaceOnChanges": true
+        },
+        "value": {
+          "type": "string",
+          "description": "Secret variable value.",
+          "secret": true
+        }
+      },
+      "required": [
+        "projectId",
+        "environmentId",
+        "key",
+        "value",
+        "railwayId"
+      ],
+      "inputProperties": {
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the Railway environment that owns the variable.",
+          "replaceOnChanges": true
+        },
+        "key": {
+          "type": "string",
+          "description": "Variable name. It must be a valid environment variable identifier.",
+          "replaceOnChanges": true
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the variable.",
+          "replaceOnChanges": true
+        },
+        "serviceId": {
+          "type": "string",
+          "description": "Optional service ID. Omit it for an environment-shared variable.",
+          "replaceOnChanges": true
+        },
+        "value": {
+          "type": "string",
+          "description": "Secret variable value.",
+          "secret": true
+        }
+      },
+      "requiredInputs": [
+        "projectId",
+        "environmentId",
+        "key",
+        "value"
+      ],
+      "aliases": [
+        {
+          "type": "railway:pkg:Variable"
+        }
+      ]
+    },
+    "railway:index:Volume": {
+      "description": "A persistent Railway volume attached to a service instance.",
+      "properties": {
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the Railway environment where the volume is attached.",
+          "replaceOnChanges": true
+        },
+        "mountPath": {
+          "type": "string",
+          "description": "Absolute mount path inside the service container."
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional display name for the volume."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the volume.",
+          "replaceOnChanges": true
+        },
+        "railwayId": {
+          "type": "string",
+          "description": "Railway volume ID."
+        },
+        "serviceId": {
+          "type": "string",
+          "description": "ID of the Railway service where the volume is attached.",
+          "replaceOnChanges": true
+        }
+      },
+      "required": [
+        "projectId",
+        "environmentId",
+        "serviceId",
+        "mountPath",
+        "railwayId"
+      ],
+      "inputProperties": {
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the Railway environment where the volume is attached.",
+          "replaceOnChanges": true
+        },
+        "mountPath": {
+          "type": "string",
+          "description": "Absolute normalized mount path inside the service container."
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional display name for the volume."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the volume.",
+          "replaceOnChanges": true
+        },
+        "serviceId": {
+          "type": "string",
+          "description": "ID of the Railway service where the volume is attached.",
+          "replaceOnChanges": true
+        }
+      },
+      "requiredInputs": [
+        "projectId",
+        "environmentId",
+        "serviceId",
+        "mountPath"
+      ],
+      "aliases": [
+        {
+          "type": "railway:pkg:Volume"
+        }
+      ]
+    }
+  }
+}

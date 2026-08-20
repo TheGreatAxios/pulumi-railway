@@ -1,0 +1,15 @@
+{
+  "name": "railway-simple",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A simple Railway project with a web service and custom domain.",
+  "main": "index.ts",
+  "dependencies": {
+    "@thegreataxios/pulumi-railway": "file:../../sdk/nodejs/bin",
+    "@pulumi/pulumi": "^3.142.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5.9.2"
+  }
+}

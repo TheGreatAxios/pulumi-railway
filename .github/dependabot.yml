@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /provider
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /sdk/nodejs
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /examples/simple
+    schedule:
+      interval: weekly

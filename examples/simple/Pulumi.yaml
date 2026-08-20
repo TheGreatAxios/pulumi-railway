@@ -1,0 +1,3 @@
+name: railway-simple
+description: A simple Railway project with a web service and custom domain.
+runtime: nodejs
