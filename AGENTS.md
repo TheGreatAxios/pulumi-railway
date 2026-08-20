@@ -20,7 +20,8 @@ Native Pulumi provider for [Railway](https://railway.com), written in Go on
   (`make nodejs-lock` refreshes it).
 - `examples/simple/` — smoke-test stack (local SDK via `file:` dep).
 - `.github/workflows/` — `ci.yml` on PRs, `release.yml` on semantic `v*.*.*` tags
-  (GoReleaser archives + npm publish; needs the `NPM_TOKEN` secret).
+  (GoReleaser archives), `publish-npm.yml` manual dispatch to publish the npm
+  package for a tag (needs the `NPM_TOKEN` secret).
 
 ## Rules
 
@@ -48,5 +49,6 @@ Native Pulumi provider for [Railway](https://railway.com), written in Go on
 ## Release
 
 Tag `vX.Y.Z`; npm version and tag must match. The release workflow runs the
-full suite, publishes binaries to GitHub releases, then the npm package with
-provenance.
+full suite and publishes binaries to GitHub releases. Publishing the npm
+package is a separate manual step: run the `Publish npm` workflow
+(`publish-npm.yml`) with the tag, which publishes with provenance.

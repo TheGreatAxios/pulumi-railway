@@ -61,39 +61,3 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
         run: ./scripts/verify-release-assets.sh "${VERSION#v}"
-
-  publish-nodejs:
-    needs: [validate, publish-provider]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: actions/setup-go@v5.5.0
-        with:
-          go-version-file: provider/go.mod
-          cache-dependency-path: provider/go.sum
-      - uses: actions/setup-node@v4.4.0
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-          cache: npm
-          cache-dependency-path: sdk/nodejs/package-lock.json
-      - uses: pulumi/setup-pulumi@v2.0.0
-      - name: Build exact npm artifact
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: make package-nodejs VERSION="${VERSION#v}"
-      - name: Publish npm package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          VERSION: ${{ github.ref_name }}
-        run: |
-          version="${VERSION#v}"
-          package="dist/thegreataxios-pulumi-railway-${version}.tgz"
-          if [[ "${version}" == *-* ]]; then
-            npm publish "${package}" --access public --provenance --tag next
-          else
-            npm publish "${package}" --access public --provenance
-          fi
