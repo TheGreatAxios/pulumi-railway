@@ -6,7 +6,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Planned for the initial `0.1.0` release.
+## [0.1.0] - 2026-08-20
+
+Initial experimental release.
 
 ### Added
 
@@ -25,4 +27,5 @@ Planned for the initial `0.1.0` release.
   domains, and lookup functions are not yet implemented.
 - Live integration tests are not yet run in CI.
 
-[Unreleased]: https://github.com/thegreataxios/pulumi-railway/commits/main
+[Unreleased]: https://github.com/thegreataxios/pulumi-railway/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/thegreataxios/pulumi-railway/releases/tag/v0.1.0
