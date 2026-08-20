@@ -21,7 +21,7 @@
     },
     "devDependencies": {
         "@types/node": "^20",
-        "typescript": "^5.9.2"
+        "typescript": "^7.0.2"
     },
     "pulumi": {
         "resource": true,
