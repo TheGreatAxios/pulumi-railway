@@ -222,17 +222,20 @@ func (*Bucket) Read(
 		}
 		return infer.ReadResponse[BucketArgs, BucketState]{}, fmt.Errorf("read bucket region: %w", err)
 	}
-	if region == nil {
-		// The bucket exists at the project level but is not deployed to
-		// this environment. Read cannot distinguish an undeployed bucket
-		// from a deleted one, so it reports gone; Update converges the
-		// deployment when the engine retries (partial-create states take
-		// this path too), and the next refresh sees it deployed.
-		return infer.ReadResponse[BucketArgs, BucketState]{}, nil
-	}
-	state.Region = *region
 	state.EnvironmentID = inputs.EnvironmentID
 	state.ProjectID = inputs.ProjectID
+	if region == nil {
+		// Project-level bucket exists but is not deployed to this
+		// environment (partial create, or the deploy patch never landed).
+		// Keep it in state so Update can re-commit the deployment;
+		// reporting gone would drop it from state and orphan the bucket.
+		// Credentials are unavailable until the instance is deployed.
+		if state.Region == "" {
+			state.Region = inputs.Region
+		}
+		return infer.ReadResponse[BucketArgs, BucketState]{ID: state.RailwayID, Inputs: state.BucketArgs, State: state}, nil
+	}
+	state.Region = *region
 
 	// Credentials describe the deployed instance; keep them fresh on refresh.
 	// A credentials failure is surfaced rather than swallowed: stale keys
@@ -343,7 +346,7 @@ func (*Bucket) Delete(
 }
 
 // verifyBucketDeleted reads the project bucket back and fails the delete
-// unless the bucket is gone or soft-deleted. It retries briefly because
+// unless the bucket is gone. It retries briefly because
 // environmentPatchCommit's ack can race the actual deletion.
 func verifyBucketDeleted(ctx context.Context, client *Client, projectID, bucketID string) error {
 	const attempts = 5
@@ -366,12 +369,15 @@ func verifyBucketDeleted(ctx context.Context, client *Client, projectID, bucketI
 		if !found {
 			return nil
 		}
-		return fmt.Errorf(
+		lastErr = fmt.Errorf(
 			"bucket %s still exists after the delete patch; the environment may have staged changes (railway environment edit commits them)",
 			bucketID,
 		)
 	}
-	return fmt.Errorf("verify bucket deletion: %w", lastErr)
+	if lastErr == nil {
+		return errors.New("verify bucket deletion: exhausted retries")
+	}
+	return lastErr
 }
 
 // deployBucketToEnvironment commits an environment patch that deploys the

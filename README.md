@@ -6,8 +6,8 @@
 
 An experimental native Pulumi provider for a subset of
 [Railway](https://railway.com): projects, services, environments, environment
-variables, custom domains, and volumes. It provides CRUD, drift detection,
-import, and replacement semantics on immutable fields.
+variables, custom domains, volumes, and object-storage buckets. It provides
+CRUD, drift detection, import, and replacement semantics on immutable fields.
 
 ## Status
 
@@ -34,6 +34,7 @@ pulumi package gen-sdk railway --language dotnet
 | `railway.Variable` | Service or shared environment variable |
 | `railway.CustomDomain` | Custom domain, DNS verification, and certificate status |
 | `railway.Volume` | Persistent volume and mount path |
+| `railway.Bucket` | S3-compatible object storage bucket |
 
 ## Installation
 
@@ -137,6 +138,7 @@ pulumi import railway:index:CustomDomain api <domain-id>/<project-id>/<environme
 pulumi import railway:index:Volume data <volume-id>/<project-id>
 # If a volume has more than one attachment, qualify the import:
 pulumi import railway:index:Volume data <volume-id>/<project-id>/<environment-id>/<service-id>
+pulumi import railway:index:Bucket uploads <project-id>/<environment-id>/<bucket-id>
 ```
 
 ## Development

@@ -1485,7 +1485,7 @@ func TestBucketReadResolvesProjectBucketAndRegion(t *testing.T) {
 	}
 }
 
-func TestBucketReadReturnsEmptyWhenBucketMissingFromEnvironment(t *testing.T) {
+func TestBucketReadKeepsUndeployedProjectBucket(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1526,8 +1526,49 @@ func TestBucketReadReturnsEmptyWhenBucketMissingFromEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bucket read failed: %v", err)
 	}
+	if response.ID != "bucket-1" {
+		t.Fatalf("undeployed project bucket must stay in state, got %#v", response)
+	}
+	if response.State.Region != "sjc" || response.State.Name == nil || *response.State.Name != "uploads" {
+		t.Fatalf("undeployed bucket state = %#v", response.State)
+	}
+	if response.State.AccessKeyID != "" {
+		t.Fatalf("undeployed bucket must not invent credentials: %#v", response.State)
+	}
+}
+
+func TestBucketReadReturnsEmptyWhenProjectBucketMissing(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(request.Query, "projectBuckets") {
+			t.Errorf("unexpected API call: %s", request.Query)
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"project": map[string]interface{}{
+				"buckets": map[string]interface{}{
+					"edges":    []map[string]interface{}{},
+					"pageInfo": map[string]interface{}{"hasNextPage": false, "endCursor": ""},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Bucket{}).Read(ctx, infer.ReadRequest[BucketArgs, BucketState]{
+		ID:     "bucket-1",
+		Inputs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc"},
+		State:  BucketState{RailwayID: "bucket-1"},
+	})
+	if err != nil {
+		t.Fatalf("bucket read failed: %v", err)
+	}
 	if response.ID != "" {
-		t.Fatalf("bucket read should be empty when not deployed, got %#v", response)
+		t.Fatalf("missing project bucket must read as gone, got %#v", response)
 	}
 }
 
@@ -1599,6 +1640,55 @@ func TestBucketDeleteFailsWhenBucketStillExistsAfterPatch(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "still exists") {
 		t.Fatalf("delete must fail loudly when the bucket persists, got %v", err)
+	}
+}
+
+func TestBucketDeleteRetriesUntilBucketIsGone(t *testing.T) {
+	t.Parallel()
+	var reads atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "environmentPatchCommit") {
+			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
+			return
+		}
+		if strings.Contains(request.Query, "projectBuckets") {
+			edges := []map[string]interface{}{}
+			if reads.Add(1) == 1 {
+				edges = []map[string]interface{}{
+					{"node": map[string]interface{}{"id": "bucket-1", "name": "uploads"}},
+				}
+			}
+			writeGraphQL(t, w, map[string]interface{}{
+				"project": map[string]interface{}{
+					"buckets": map[string]interface{}{
+						"edges":    edges,
+						"pageInfo": map[string]interface{}{"hasNextPage": false, "endCursor": ""},
+					},
+				},
+			})
+			return
+		}
+		t.Errorf("unexpected API call: %s", request.Query)
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Bucket{}).Delete(ctx, infer.DeleteRequest[BucketState]{
+		ID: "bucket-1",
+		State: BucketState{
+			BucketArgs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc"},
+			RailwayID:  "bucket-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("delete should succeed after the bucket disappears, got %v", err)
+	}
+	if reads.Load() < 2 {
+		t.Fatalf("delete must retry verification when the bucket still exists, got %d reads", reads.Load())
 	}
 }
 
