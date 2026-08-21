@@ -113,6 +113,102 @@
     }
   },
   "resources": {
+    "railway:index:Bucket": {
+      "description": "An S3-compatible Railway object storage bucket deployed to one environment.",
+      "properties": {
+        "accessKeyId": {
+          "type": "string",
+          "description": "S3 access key ID for the bucket's environment instance."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "S3 API endpoint, for example https://storage.railway.app."
+        },
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the environment the bucket is deployed to.",
+          "replaceOnChanges": true
+        },
+        "name": {
+          "type": "string",
+          "description": "Bucket display name."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the bucket.",
+          "replaceOnChanges": true
+        },
+        "railwayId": {
+          "type": "string",
+          "description": "Immutable Railway bucket ID."
+        },
+        "region": {
+          "type": "string",
+          "description": "Bucket region.",
+          "replaceOnChanges": true
+        },
+        "s3BucketName": {
+          "type": "string",
+          "description": "Globally unique bucket name for the S3 API (display name plus hash)."
+        },
+        "s3Region": {
+          "type": "string",
+          "description": "Region value S3 clients should use, for example auto."
+        },
+        "secretAccessKey": {
+          "type": "string",
+          "description": "S3 secret access key for the bucket's environment instance.",
+          "secret": true
+        },
+        "urlStyle": {
+          "type": "string",
+          "description": "URL style S3 clients should use: virtual or path."
+        }
+      },
+      "required": [
+        "projectId",
+        "environmentId",
+        "region",
+        "railwayId",
+        "endpoint",
+        "accessKeyId",
+        "secretAccessKey",
+        "s3BucketName",
+        "s3Region",
+        "urlStyle"
+      ],
+      "inputProperties": {
+        "environmentId": {
+          "type": "string",
+          "description": "ID of the environment the bucket is deployed to.",
+          "replaceOnChanges": true
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name for the bucket. Railway generates a name when omitted."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the bucket.",
+          "replaceOnChanges": true
+        },
+        "region": {
+          "type": "string",
+          "description": "Bucket region: sjc (US West), iad (US East), ams (EU West), or sin (Asia Pacific). It cannot change after creation.",
+          "replaceOnChanges": true
+        }
+      },
+      "requiredInputs": [
+        "projectId",
+        "environmentId",
+        "region"
+      ],
+      "aliases": [
+        {
+          "type": "railway:pkg:Bucket"
+        }
+      ]
+    },
     "railway:index:CustomDomain": {
       "description": "A custom domain attached to a Railway service instance.",
       "properties": {

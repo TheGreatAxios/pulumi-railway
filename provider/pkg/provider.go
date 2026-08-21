@@ -106,6 +106,7 @@ func BuildProvider() (provider.Provider, error) {
 			infer.Resource(&Variable{}),
 			infer.Resource(&CustomDomainResource{}),
 			infer.Resource(&Volume{}),
+			infer.Resource(&Bucket{}),
 		).
 		WithLanguageMap(map[string]any{
 			"nodejs": map[string]any{
