@@ -1156,6 +1156,36 @@ func introspectErr(err error) string {
 	return err.Error()
 }
 
+func TestEnvironmentImportParsesCompositeID(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Variables["id"] != "environment-2" {
+			t.Errorf("environment id = %#v, want environment-2", request.Variables["id"])
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"environment": map[string]interface{}{
+				"id": "environment-2", "name": "staging", "projectId": "project-1",
+			},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Environment{}).Read(ctx, infer.ReadRequest[EnvironmentArgs, EnvironmentState]{
+		ID: "project-1/environment-2",
+	})
+	if err != nil {
+		t.Fatalf("import read failed: %v", err)
+	}
+	if response.ID != "environment-2" || response.Inputs.ProjectID != "project-1" || response.Inputs.Name != "staging" {
+		t.Fatalf("imported environment = id=%q inputs=%#v", response.ID, response.Inputs)
+	}
+}
+
 func TestEnvironmentUpdateRenameFailurePropagates(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
