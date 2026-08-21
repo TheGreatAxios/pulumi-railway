@@ -35,6 +35,10 @@ export class Service extends pulumi.CustomResource {
     }
 
     /**
+     * Automatic image update policy.
+     */
+    declare public readonly autoUpdateType: pulumi.Output<string | undefined>;
+    /**
      * GitHub branch deployed by the service.
      */
     declare public readonly branch: pulumi.Output<string | undefined>;
@@ -51,6 +55,10 @@ export class Service extends pulumi.CustomResource {
      */
     declare public readonly healthcheckPath: pulumi.Output<string | undefined>;
     /**
+     * Health check timeout in seconds.
+     */
+    declare public readonly healthcheckTimeout: pulumi.Output<number | undefined>;
+    /**
      * Docker image source.
      */
     declare public readonly image: pulumi.Output<string | undefined>;
@@ -63,7 +71,7 @@ export class Service extends pulumi.CustomResource {
      */
     declare public readonly name: pulumi.Output<string>;
     /**
-     * Number of service replicas.
+     * Number of service replicas. Zero means scaled to zero.
      */
     declare public readonly numReplicas: pulumi.Output<number | undefined>;
     /**
@@ -111,10 +119,12 @@ export class Service extends pulumi.CustomResource {
             if (args?.projectId === undefined && !opts.urn) {
                 throw new Error("Missing required property 'projectId'");
             }
+            resourceInputs["autoUpdateType"] = args?.autoUpdateType;
             resourceInputs["branch"] = args?.branch;
             resourceInputs["buildCommand"] = args?.buildCommand;
             resourceInputs["environmentId"] = args?.environmentId;
             resourceInputs["healthcheckPath"] = args?.healthcheckPath;
+            resourceInputs["healthcheckTimeout"] = args?.healthcheckTimeout;
             resourceInputs["image"] = args?.image;
             resourceInputs["name"] = args?.name;
             resourceInputs["numReplicas"] = args?.numReplicas;
@@ -126,10 +136,12 @@ export class Service extends pulumi.CustomResource {
             resourceInputs["instanceId"] = undefined /*out*/;
             resourceInputs["railwayId"] = undefined /*out*/;
         } else {
+            resourceInputs["autoUpdateType"] = undefined /*out*/;
             resourceInputs["branch"] = undefined /*out*/;
             resourceInputs["buildCommand"] = undefined /*out*/;
             resourceInputs["environmentId"] = undefined /*out*/;
             resourceInputs["healthcheckPath"] = undefined /*out*/;
+            resourceInputs["healthcheckTimeout"] = undefined /*out*/;
             resourceInputs["image"] = undefined /*out*/;
             resourceInputs["instanceId"] = undefined /*out*/;
             resourceInputs["name"] = undefined /*out*/;
@@ -144,7 +156,7 @@ export class Service extends pulumi.CustomResource {
         opts = pulumi.mergeOptions(utilities.resourceOptsDefaults(), opts);
         const aliasOpts = { aliases: [{ type: "railway:pkg:Service" }] };
         opts = pulumi.mergeOptions(opts, aliasOpts);
-        const replaceOnChanges = { replaceOnChanges: ["branch", "environmentId", "image", "projectId", "repo"] };
+        const replaceOnChanges = { replaceOnChanges: ["branch", "environmentId", "projectId", "repo"] };
         opts = pulumi.mergeOptions(opts, replaceOnChanges);
         super(Service.__pulumiType, name, resourceInputs, opts);
     }
@@ -154,6 +166,10 @@ export class Service extends pulumi.CustomResource {
  * The set of arguments for constructing a Service resource.
  */
 export interface ServiceArgs {
+    /**
+     * Automatic image update policy: disabled, patch, or minor. Requires an image source from Docker Hub or GHCR.
+     */
+    autoUpdateType?: pulumi.Input<string | undefined>;
     /**
      * GitHub branch to deploy. Valid only when repo is set.
      */
@@ -171,7 +187,11 @@ export interface ServiceArgs {
      */
     healthcheckPath?: pulumi.Input<string | undefined>;
     /**
-     * Docker image source, for example redis:7-alpine. Mutually exclusive with repo.
+     * Health check timeout in seconds. Railway defaults to 300.
+     */
+    healthcheckTimeout?: pulumi.Input<number | undefined>;
+    /**
+     * Docker image source, for example redis:7-alpine. Mutually exclusive with repo. Changing the image updates the service in place.
      */
     image?: pulumi.Input<string | undefined>;
     /**
@@ -179,7 +199,7 @@ export interface ServiceArgs {
      */
     name: pulumi.Input<string>;
     /**
-     * Number of service replicas. Must be at least one.
+     * Number of service replicas. Zero sends zero replicas to Railway; combining with Railway's serverless (App Sleep) feature is required to stop incurring usage while idle.
      */
     numReplicas?: pulumi.Input<number | undefined>;
     /**

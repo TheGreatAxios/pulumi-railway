@@ -83,7 +83,11 @@ func TestServiceUpdateSendsExplicitNullForClearedSettings(t *testing.T) {
 	next := ServiceArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web"}
 	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
 	response, err := (&Service{}).Update(ctx, infer.UpdateRequest[ServiceArgs, ServiceState]{
-		ID: "service-1", State: ServiceState{ServiceArgs: old, RailwayID: "service-1"}, Inputs: next,
+		ID: "service-1",
+		State: ServiceState{
+			ServiceArgs: old, RailwayID: "service-1", InstanceID: "instance-1",
+		},
+		Inputs: next,
 	})
 	if err != nil {
 		t.Fatalf("update failed: %v", err)
@@ -457,22 +461,28 @@ func TestProjectReadHydratesWorkspaceID(t *testing.T) {
 
 func TestServiceReadHydratesBranch(t *testing.T) {
 	t.Parallel()
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		switch calls.Add(1) {
-		case 1:
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "query service(") {
 			writeGraphQL(t, w, map[string]interface{}{
 				"service": map[string]interface{}{
 					"id": "service-1", "name": "web", "projectId": "project-1", "branch": "main",
 				},
 			})
-		case 2:
-			writeGraphQL(t, w, map[string]interface{}{
-				"serviceInstance": map[string]interface{}{"id": "instance-1"},
-			})
-		default:
-			t.Fatalf("unexpected request")
+			return
 		}
+		if strings.Contains(request.Query, "environmentConfig") {
+			writeGraphQL(t, w, map[string]interface{}{
+				"environment": map[string]interface{}{"config": json.RawMessage(`{}`)},
+			})
+			return
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"serviceInstance": map[string]interface{}{"id": "instance-1"},
+		})
 	}))
 	defer server.Close()
 	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
@@ -1699,27 +1709,23 @@ func TestBucketReadPaginatesProjectBuckets(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if !strings.Contains(request.Query, "projectBuckets") {
-			if strings.Contains(request.Query, "environmentConfig") {
-				config := `{"buckets": {"bucket-1": {"region": "sjc", "isCreated": true}}}`
-				writeGraphQL(t, w, map[string]interface{}{
-					"environment": map[string]interface{}{"config": json.RawMessage(config)},
-				})
-				return
-			}
-			if strings.Contains(request.Query, "bucketS3Credentials") {
-				writeGraphQL(t, w, map[string]interface{}{
-					"bucketS3Credentials": []map[string]interface{}{
-						{
-							"accessKeyId": "key-1", "secretAccessKey": "secret-1",
-							"endpoint": "https://storage.railway.app", "bucketName": "uploads",
-							"region": "auto", "urlStyle": "virtual",
-						},
+		if strings.Contains(request.Query, "environmentConfig") {
+			config := `{"buckets": {"bucket-1": {"region": "sjc", "isCreated": true}}}`
+			writeGraphQL(t, w, map[string]interface{}{
+				"environment": map[string]interface{}{"config": json.RawMessage(config)},
+			})
+			return
+		}
+		if strings.Contains(request.Query, "bucketS3Credentials") {
+			writeGraphQL(t, w, map[string]interface{}{
+				"bucketS3Credentials": []map[string]interface{}{
+					{
+						"accessKeyId": "key-1", "secretAccessKey": "secret-1",
+						"endpoint": "https://storage.railway.app", "bucketName": "uploads",
+						"region": "auto", "urlStyle": "virtual",
 					},
-				})
-				return
-			}
-			t.Errorf("unexpected API call: %s", request.Query)
+				},
+			})
 			return
 		}
 		if request.Variables["after"] == nil {
@@ -1757,5 +1763,527 @@ func TestBucketReadPaginatesProjectBuckets(t *testing.T) {
 	}
 	if response.State.Name == nil || *response.State.Name != "uploads" {
 		t.Fatalf("bucket after pagination was not found: %#v", response.State)
+	}
+}
+
+// --- Service upgrades (healthcheckTimeout, in-place image, replicas 0, autoUpdates) ---
+
+func TestServiceUpdateChangesImageInPlace(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "serviceDelete") {
+			t.Errorf("image change must not delete the service")
+		}
+		if strings.Contains(request.Query, "serviceInstanceUpdate") {
+			input, _ := request.Variables["input"].(map[string]interface{})
+			source, _ := input["source"].(map[string]interface{})
+			if source == nil || source["image"] != "ghcr.io/acme/web@sha256:new" {
+				t.Errorf("instance update source = %#v", input)
+			}
+			writeGraphQL(t, w, map[string]interface{}{"serviceInstanceUpdate": true})
+			return
+		}
+		writeGraphQL(t, w, map[string]interface{}{})
+	}))
+	defer server.Close()
+
+	oldImage := "ghcr.io/acme/web@sha256:old"
+	newImage := "ghcr.io/acme/web@sha256:new"
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Service{}).Update(ctx, infer.UpdateRequest[ServiceArgs, ServiceState]{
+		ID: "service-1",
+		State: ServiceState{
+			ServiceArgs: ServiceArgs{
+				ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web", Image: &oldImage,
+			},
+			RailwayID: "service-1", InstanceID: "instance-1",
+		},
+		Inputs: ServiceArgs{
+			ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web", Image: &newImage,
+		},
+	})
+	if err != nil {
+		t.Fatalf("in-place image update failed: %v", err)
+	}
+	if response.Output.Image == nil || *response.Output.Image != newImage {
+		t.Fatalf("update output image = %#v", response.Output.Image)
+	}
+}
+
+func TestServiceUpdateUnchangedImageSendsNoSource(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "serviceInstanceUpdate") {
+			input, _ := request.Variables["input"].(map[string]interface{})
+			if _, exists := input["source"]; exists {
+				t.Errorf("unchanged image must not resend source: %#v", input)
+			}
+			writeGraphQL(t, w, map[string]interface{}{"serviceInstanceUpdate": true})
+			return
+		}
+		t.Errorf("unexpected API call: %s", request.Query)
+	}))
+	defer server.Close()
+
+	image := "ghcr.io/acme/web@sha256:pin"
+	start := "npm start"
+	old := ServiceArgs{
+		ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web", Image: &image, StartCommand: &start,
+	}
+	next := ServiceArgs{
+		ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web", Image: &image, StartCommand: &start,
+	}
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Service{}).Update(ctx, infer.UpdateRequest[ServiceArgs, ServiceState]{
+		ID: "service-1", State: ServiceState{
+			ServiceArgs: old, RailwayID: "service-1", InstanceID: "instance-1",
+		}, Inputs: next,
+	})
+	if err != nil {
+		t.Fatalf("no-op update failed: %v", err)
+	}
+}
+
+func TestServiceUpdateScalesToZeroReplicas(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "serviceInstanceUpdate") {
+			input, _ := request.Variables["input"].(map[string]interface{})
+			if value, ok := input["numReplicas"].(float64); !ok || value != 0 {
+				t.Errorf("numReplicas = %#v, want 0", input["numReplicas"])
+			}
+			writeGraphQL(t, w, map[string]interface{}{"serviceInstanceUpdate": true})
+			return
+		}
+		writeGraphQL(t, w, map[string]interface{}{})
+	}))
+	defer server.Close()
+
+	one, zero := 1, 0
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Service{}).Update(ctx, infer.UpdateRequest[ServiceArgs, ServiceState]{
+		ID: "service-1",
+		State: ServiceState{
+			ServiceArgs: ServiceArgs{
+				ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web", NumReplicas: &one,
+			},
+			RailwayID: "service-1", InstanceID: "instance-1",
+		},
+		Inputs: ServiceArgs{
+			ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web", NumReplicas: &zero,
+		},
+	})
+	if err != nil {
+		t.Fatalf("scale-to-zero failed: %v", err)
+	}
+}
+
+func TestServiceUpdatePatchesAutoUpdatePolicy(t *testing.T) {
+	t.Parallel()
+	sawInstanceUpdate := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "environmentPatchCommit") {
+			patch, _ := request.Variables["patch"].(map[string]interface{})
+			services, _ := patch["services"].(map[string]interface{})
+			instance, _ := services["service-1"].(map[string]interface{})
+			source, _ := instance["source"].(map[string]interface{})
+			autoUpdates, _ := source["autoUpdates"].(map[string]interface{})
+			if autoUpdates["type"] != "patch" {
+				t.Errorf("autoUpdates patch = %#v", patch)
+			}
+			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
+			return
+		}
+		if strings.Contains(request.Query, "serviceInstanceUpdate") {
+			sawInstanceUpdate = true
+			writeGraphQL(t, w, map[string]interface{}{"serviceInstanceUpdate": true})
+			return
+		}
+		t.Errorf("unexpected API call: %s", request.Query)
+	}))
+	defer server.Close()
+
+	image := "gotenberg/gotenberg:8"
+	start := "gotenberg --api-port=3000"
+	patchType := "patch"
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Service{}).Update(ctx, infer.UpdateRequest[ServiceArgs, ServiceState]{
+		ID: "service-1",
+		State: ServiceState{
+			ServiceArgs: ServiceArgs{
+				ProjectID: "project-1", EnvironmentID: "environment-1", Name: "gotenberg", Image: &image,
+			},
+			RailwayID: "service-1", InstanceID: "instance-1",
+		},
+		Inputs: ServiceArgs{
+			ProjectID: "project-1", EnvironmentID: "environment-1", Name: "gotenberg", Image: &image,
+			StartCommand: &start, AutoUpdateType: &patchType,
+		},
+	})
+	if err != nil {
+		t.Fatalf("auto-update patch failed: %v", err)
+	}
+	if !sawInstanceUpdate {
+		t.Error("expected a serviceInstanceUpdate for the changed start command")
+	}
+}
+
+func TestServiceUpdateClearsAutoUpdatePolicy(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "environmentPatchCommit") {
+			patch, _ := request.Variables["patch"].(map[string]interface{})
+			services, _ := patch["services"].(map[string]interface{})
+			instance, _ := services["service-1"].(map[string]interface{})
+			source, _ := instance["source"].(map[string]interface{})
+			autoUpdates, _ := source["autoUpdates"].(map[string]interface{})
+			if autoUpdates["type"] != "disabled" {
+				t.Errorf("clear autoUpdates patch = %#v", patch)
+			}
+			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
+			return
+		}
+		t.Errorf("unexpected API call: %s", request.Query)
+	}))
+	defer server.Close()
+
+	image := "gotenberg/gotenberg:8"
+	oldType := "patch"
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Service{}).Update(ctx, infer.UpdateRequest[ServiceArgs, ServiceState]{
+		ID: "service-1",
+		State: ServiceState{
+			ServiceArgs: ServiceArgs{
+				ProjectID: "project-1", EnvironmentID: "environment-1", Name: "gotenberg", Image: &image, AutoUpdateType: &oldType,
+			},
+			RailwayID: "service-1", InstanceID: "instance-1",
+		},
+		Inputs: ServiceArgs{
+			ProjectID: "project-1", EnvironmentID: "environment-1", Name: "gotenberg", Image: &image,
+		},
+	})
+	if err != nil {
+		t.Fatalf("auto-update clear failed: %v", err)
+	}
+}
+
+func TestServiceCreateWithAutoUpdatePolicy(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch calls.Add(1) {
+		case 1:
+			writeGraphQL(t, w, map[string]interface{}{
+				"serviceCreate": map[string]interface{}{"id": "service-1", "name": "gotenberg"},
+			})
+		case 2:
+			writeGraphQL(t, w, map[string]interface{}{"serviceInstanceUpdate": true})
+		case 3:
+			if !strings.Contains(request.Query, "environmentPatchCommit") {
+				t.Errorf("expected environmentPatchCommit, got %s", request.Query)
+			}
+			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
+		case 4:
+			writeGraphQL(t, w, map[string]interface{}{
+				"serviceInstance": map[string]interface{}{"id": "instance-1"},
+			})
+		default:
+			t.Errorf("unexpected request %d", calls.Load())
+		}
+	}))
+	defer server.Close()
+
+	image := "gotenberg/gotenberg:8"
+	minor := "minor"
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Service{}).Create(ctx, infer.CreateRequest[ServiceArgs]{
+		Name: "gotenberg",
+		Inputs: ServiceArgs{
+			ProjectID: "project-1", EnvironmentID: "environment-1", Name: "gotenberg",
+			Image: &image, AutoUpdateType: &minor,
+		},
+	})
+	if err != nil {
+		t.Fatalf("service create with auto-update failed: %v", err)
+	}
+	if response.Output.AutoUpdateType == nil || *response.Output.AutoUpdateType != "minor" {
+		t.Fatalf("create output autoUpdateType = %#v", response.Output.AutoUpdateType)
+	}
+}
+
+func TestServiceUpdateSendsHealthcheckTimeout(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "serviceInstanceUpdate") {
+			input, _ := request.Variables["input"].(map[string]interface{})
+			if value, ok := input["healthcheckTimeout"].(float64); !ok || value != 30 {
+				t.Errorf("healthcheckTimeout = %#v, want 30", input["healthcheckTimeout"])
+			}
+			writeGraphQL(t, w, map[string]interface{}{"serviceInstanceUpdate": true})
+			return
+		}
+		writeGraphQL(t, w, map[string]interface{}{})
+	}))
+	defer server.Close()
+
+	oldTimeout, newTimeout := 300, 30
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Service{}).Update(ctx, infer.UpdateRequest[ServiceArgs, ServiceState]{
+		ID: "service-1",
+		State: ServiceState{
+			ServiceArgs: ServiceArgs{
+				ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web", HealthcheckTimeout: &oldTimeout,
+			},
+			RailwayID: "service-1", InstanceID: "instance-1",
+		},
+		Inputs: ServiceArgs{
+			ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web", HealthcheckTimeout: &newTimeout,
+		},
+	})
+	if err != nil {
+		t.Fatalf("healthcheck timeout update failed: %v", err)
+	}
+}
+
+func TestServiceReadPopulatesAutoUpdatePolicyFromEnvironmentConfig(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "query serviceInstance") {
+			// ServiceSource exposes only image and repo; the policy lives
+			// in the environment config.
+			writeGraphQL(t, w, map[string]interface{}{
+				"serviceInstance": map[string]interface{}{
+					"id":                 "instance-1",
+					"healthcheckTimeout": 60,
+					"source": map[string]interface{}{
+						"image": "gotenberg/gotenberg:8",
+					},
+				},
+			})
+			return
+		}
+		if strings.Contains(request.Query, "environmentConfig") {
+			config := `{"services": {"service-1": {"source": {"image": "gotenberg/gotenberg:8", "autoUpdates": {"type": "patch"}}}}}`
+			writeGraphQL(t, w, map[string]interface{}{
+				"environment": map[string]interface{}{"config": json.RawMessage(config)},
+			})
+			return
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"service": map[string]interface{}{
+				"id": "service-1", "name": "gotenberg", "projectId": "project-1",
+			},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Service{}).Read(ctx, infer.ReadRequest[ServiceArgs, ServiceState]{
+		ID:     "service-1",
+		Inputs: ServiceArgs{EnvironmentID: "environment-1"},
+		State:  ServiceState{RailwayID: "service-1"},
+	})
+	if err != nil {
+		t.Fatalf("service read failed: %v", err)
+	}
+	if response.State.AutoUpdateType == nil || *response.State.AutoUpdateType != "patch" {
+		t.Fatalf("read autoUpdateType = %#v", response.State.AutoUpdateType)
+	}
+	if response.State.HealthcheckTimeout == nil || *response.State.HealthcheckTimeout != 60 {
+		t.Fatalf("read healthcheckTimeout = %#v", response.State.HealthcheckTimeout)
+	}
+}
+
+func TestServiceReadTreatsDisabledAutoUpdatePolicyAsUnset(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "query serviceInstance") {
+			writeGraphQL(t, w, map[string]interface{}{
+				"serviceInstance": map[string]interface{}{"id": "instance-1"},
+			})
+			return
+		}
+		if strings.Contains(request.Query, "environmentConfig") {
+			config := `{"services": {"service-1": {"source": {"autoUpdates": {"type": "disabled"}}}}}`
+			writeGraphQL(t, w, map[string]interface{}{
+				"environment": map[string]interface{}{"config": json.RawMessage(config)},
+			})
+			return
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"service": map[string]interface{}{
+				"id": "service-1", "name": "web", "projectId": "project-1",
+			},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Service{}).Read(ctx, infer.ReadRequest[ServiceArgs, ServiceState]{
+		ID:     "service-1",
+		Inputs: ServiceArgs{EnvironmentID: "environment-1"},
+		State:  ServiceState{RailwayID: "service-1"},
+	})
+	if err != nil {
+		t.Fatalf("service read failed: %v", err)
+	}
+	if response.State.AutoUpdateType != nil {
+		t.Fatalf("disabled autoUpdateType must read as unset, got %#v", response.State.AutoUpdateType)
+	}
+}
+
+func TestServiceCheckNormalizesDisabledAutoUpdateType(t *testing.T) {
+	t.Parallel()
+	image := property.New("gotenberg/gotenberg:8")
+	response, err := (&Service{}).Check(t.Context(), infer.CheckRequest{
+		Name: "gotenberg",
+		NewInputs: property.NewMap(map[string]property.Value{
+			"projectId":      property.New("project-1"),
+			"environmentId":  property.New("environment-1"),
+			"name":           property.New("gotenberg"),
+			"image":          image,
+			"autoUpdateType": property.New("disabled"),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if len(response.Failures) != 0 {
+		t.Fatalf("disabled autoUpdateType must be valid: %#v", response.Failures)
+	}
+	if response.Inputs.AutoUpdateType != nil {
+		t.Fatalf("disabled autoUpdateType must be stored as unset, got %#v", response.Inputs.AutoUpdateType)
+	}
+}
+
+func TestServiceUpdateReappliesConfigurationAfterFailedInit(t *testing.T) {
+	t.Parallel()
+	var instanceUpdates atomic.Int32
+	var policyPatches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "serviceInstanceUpdate") {
+			input, _ := request.Variables["input"].(map[string]interface{})
+			// The failed create never applied the start command, so the
+			// convergence update must resend it even though inputs match
+			// the (partial) recorded state.
+			if input["startCommand"] != "npm start" {
+				t.Errorf("convergence update must resend the start command: %#v", input)
+			}
+			instanceUpdates.Add(1)
+			writeGraphQL(t, w, map[string]interface{}{"serviceInstanceUpdate": true})
+			return
+		}
+		if strings.Contains(request.Query, "environmentPatchCommit") {
+			policyPatches.Add(1)
+			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
+			return
+		}
+		if strings.Contains(request.Query, "query serviceInstance") {
+			writeGraphQL(t, w, map[string]interface{}{
+				"serviceInstance": map[string]interface{}{"id": "instance-9"},
+			})
+			return
+		}
+		t.Errorf("unexpected API call: %s", request.Query)
+	}))
+	defer server.Close()
+
+	start := "npm start"
+	image := "gotenberg/gotenberg:8"
+	patchType := "patch"
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Service{}).Update(ctx, infer.UpdateRequest[ServiceArgs, ServiceState]{
+		ID: "service-1",
+		// Partial state from a failed create: no InstanceID, start command
+		// and policy present in inputs but never applied server-side.
+		State: ServiceState{
+			ServiceArgs: ServiceArgs{
+				ProjectID: "project-1", EnvironmentID: "environment-1", Name: "gotenberg",
+				Image: &image, StartCommand: &start, AutoUpdateType: &patchType,
+			},
+			RailwayID: "service-1",
+		},
+		Inputs: ServiceArgs{
+			ProjectID: "project-1", EnvironmentID: "environment-1", Name: "gotenberg",
+			Image: &image, StartCommand: &start, AutoUpdateType: &patchType,
+		},
+	})
+	if err != nil {
+		t.Fatalf("convergence update failed: %v", err)
+	}
+	if instanceUpdates.Load() != 1 {
+		t.Errorf("expected exactly one convergence serviceInstanceUpdate, got %d", instanceUpdates.Load())
+	}
+	if policyPatches.Load() != 1 {
+		t.Errorf("expected exactly one policy patch, got %d", policyPatches.Load())
+	}
+	if response.Output.InstanceID != "instance-9" {
+		t.Fatalf("convergence update did not record the instance ID: %#v", response.Output)
+	}
+}
+
+func TestServiceUpdateRejectsRemovingImage(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("image removal must be rejected before any API call")
+	}))
+	defer server.Close()
+
+	oldImage := "ghcr.io/acme/web@sha256:old"
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Service{}).Update(ctx, infer.UpdateRequest[ServiceArgs, ServiceState]{
+		ID: "service-1",
+		State: ServiceState{
+			ServiceArgs: ServiceArgs{
+				ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web", Image: &oldImage,
+			},
+			RailwayID: "service-1", InstanceID: "instance-1",
+		},
+		Inputs: ServiceArgs{
+			ProjectID: "project-1", EnvironmentID: "environment-1", Name: "web",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "removing image is not supported") {
+		t.Fatalf("image removal must fail loudly, got %v", err)
 	}
 }

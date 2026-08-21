@@ -117,10 +117,10 @@ export const projectId = project.id;
 export const serviceId = web.id;
 ```
 
-Changing a service's image, repository, branch, project, or environment
-replaces the service. This avoids checkpointing source changes that Railway has
-not applied. Parent identifiers and other immutable identity fields on all
-resources also use replacement semantics.
+Changing a service's repository, branch, project, or environment replaces the
+service. Image changes update the existing service in place. Parent identifiers
+and other immutable identity fields on all resources also use replacement
+semantics.
 
 Variable creation is create-only. If the same key already exists in Railway,
 creation fails instead of overwriting it. Import the existing variable first,
