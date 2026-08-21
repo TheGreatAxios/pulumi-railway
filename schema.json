@@ -205,6 +205,49 @@
         }
       ]
     },
+    "railway:index:Environment": {
+      "description": "A Railway environment inside a project.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Environment name."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the environment.",
+          "replaceOnChanges": true
+        },
+        "railwayId": {
+          "type": "string",
+          "description": "Immutable Railway environment ID."
+        }
+      },
+      "required": [
+        "projectId",
+        "name",
+        "railwayId"
+      ],
+      "inputProperties": {
+        "name": {
+          "type": "string",
+          "description": "Environment name. It must be unique within the project."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the Railway project that owns the environment.",
+          "replaceOnChanges": true
+        }
+      },
+      "requiredInputs": [
+        "projectId",
+        "name"
+      ],
+      "aliases": [
+        {
+          "type": "railway:pkg:Environment"
+        }
+      ]
+    },
     "railway:index:Project": {
       "description": "A Railway project, the top-level container for services and environments.",
       "properties": {

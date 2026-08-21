@@ -949,3 +949,228 @@ func TestCheckFailsWhenRequiredValueIsEmpty(t *testing.T) {
 		t.Fatalf("empty environmentId must fail validation: %#v", response.Failures)
 	}
 }
+
+// --- Environment ---
+
+func TestEnvironmentCreateIssuesGraphQLCreate(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(request.Query, "environmentCreate") {
+			t.Errorf("expected environmentCreate, got %s", request.Query)
+		}
+		input, _ := request.Variables["input"].(map[string]interface{})
+		if input["projectId"] != "project-1" || input["name"] != "staging" {
+			t.Errorf("environmentCreate input = %#v", input)
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"environmentCreate": map[string]interface{}{"id": "environment-2", "name": "staging"},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Environment{}).Create(ctx, infer.CreateRequest[EnvironmentArgs]{
+		Name:   "staging",
+		Inputs: EnvironmentArgs{ProjectID: "project-1", Name: "staging"},
+	})
+	if err != nil {
+		t.Fatalf("environment create failed: %v", err)
+	}
+	if response.ID != "environment-2" {
+		t.Fatalf("environment create ID = %q, want environment-2", response.ID)
+	}
+	if response.Output.RailwayID != "environment-2" || response.Output.Name != "staging" {
+		t.Fatalf("environment create output = %#v", response.Output)
+	}
+}
+
+func TestEnvironmentCreateFailsOnEmptyID(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeGraphQL(t, w, map[string]interface{}{
+			"environmentCreate": map[string]interface{}{"id": "", "name": "staging"},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Environment{}).Create(ctx, infer.CreateRequest[EnvironmentArgs]{
+		Name:   "staging",
+		Inputs: EnvironmentArgs{ProjectID: "project-1", Name: "staging"},
+	})
+	if err == nil {
+		t.Fatal("expected empty-ID create to fail")
+	}
+}
+
+func TestEnvironmentUpdateRenames(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(request.Query, "environmentRename") {
+			t.Errorf("expected environmentRename, got %s", request.Query)
+		}
+		// environmentRename returns Environment!, so the mutation must
+		// select a subselection (a bare scalar shape is invalid GraphQL).
+		if !strings.Contains(request.Query, "environmentRename(id: $id, input: $input) { id }") {
+			t.Errorf("environmentRename must select fields from the returned Environment: %s", request.Query)
+		}
+		if request.Variables["id"] != "environment-2" {
+			t.Errorf("environmentRename id = %#v", request.Variables["id"])
+		}
+		input, _ := request.Variables["input"].(map[string]interface{})
+		if input["name"] != "production" {
+			t.Errorf("environmentRename input = %#v", input)
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"environmentRename": map[string]interface{}{"id": "environment-2"},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Environment{}).Update(ctx, infer.UpdateRequest[EnvironmentArgs, EnvironmentState]{
+		ID:     "environment-2",
+		State:  EnvironmentState{EnvironmentArgs: EnvironmentArgs{ProjectID: "project-1", Name: "staging"}, RailwayID: "environment-2"},
+		Inputs: EnvironmentArgs{ProjectID: "project-1", Name: "production"},
+	})
+	if err != nil {
+		t.Fatalf("environment rename failed: %v", err)
+	}
+	if response.Output.Name != "production" {
+		t.Fatalf("environment rename output = %#v", response.Output)
+	}
+}
+
+func TestEnvironmentUpdateSkipsAPIWhenNameUnchanged(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("update with unchanged name must not call the API")
+		writeGraphQL(t, w, map[string]interface{}{})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Environment{}).Update(ctx, infer.UpdateRequest[EnvironmentArgs, EnvironmentState]{
+		ID:     "environment-2",
+		State:  EnvironmentState{EnvironmentArgs: EnvironmentArgs{ProjectID: "project-1", Name: "staging"}, RailwayID: "environment-2"},
+		Inputs: EnvironmentArgs{ProjectID: "project-1", Name: "staging"},
+	})
+	if err != nil {
+		t.Fatalf("environment no-op update failed: %v", err)
+	}
+}
+
+func TestEnvironmentReadPopulatesStateFromAPI(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"environment": map[string]interface{}{
+				"id": "environment-2", "name": "staging", "projectId": "project-1",
+			},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Environment{}).Read(ctx, infer.ReadRequest[EnvironmentArgs, EnvironmentState]{
+		ID:     "environment-2",
+		Inputs: EnvironmentArgs{ProjectID: "project-1", Name: "old-name"},
+		State:  EnvironmentState{RailwayID: "environment-2"},
+	})
+	if err != nil {
+		t.Fatalf("environment read failed: %v", err)
+	}
+	if response.State.Name != "staging" || response.State.ProjectID != "project-1" {
+		t.Fatalf("environment read state = %#v", response.State)
+	}
+	if response.Inputs.Name != "staging" {
+		t.Fatalf("environment read inputs = %#v", response.Inputs)
+	}
+}
+
+func TestEnvironmentReadReturnsEmptyWhenAPIReturnsNullEnvironment(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeGraphQL(t, w, map[string]interface{}{"environment": nil})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Environment{}).Read(ctx, infer.ReadRequest[EnvironmentArgs, EnvironmentState]{
+		ID:     "environment-2",
+		Inputs: EnvironmentArgs{ProjectID: "project-1", Name: "staging"},
+		State:  EnvironmentState{RailwayID: "environment-2"},
+	})
+	if err != nil {
+		t.Fatalf("environment read failed: %v", err)
+	}
+	if response.ID != "" || response.State.RailwayID != "" {
+		t.Fatalf("environment read should be empty when the environment is gone, got %#v", response)
+	}
+}
+
+func TestEnvironmentDeleteIsIdempotent(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"errors": []map[string]interface{}{
+				{"message": "environment not found", "extensions": map[string]interface{}{"code": "NOT_FOUND"}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Environment{}).Delete(ctx, infer.DeleteRequest[EnvironmentState]{
+		ID: "environment-2",
+		State: EnvironmentState{
+			EnvironmentArgs: EnvironmentArgs{ProjectID: "project-1", Name: "staging"},
+			RailwayID:       "environment-2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("environment delete should be idempotent, got %v", introspectErr(err))
+	}
+}
+
+func introspectErr(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return err.Error()
+}
+
+func TestEnvironmentUpdateRenameFailurePropagates(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"errors":[{"message":"environment name already exists"}]}`))
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Environment{}).Update(ctx, infer.UpdateRequest[EnvironmentArgs, EnvironmentState]{
+		ID:     "environment-2",
+		State:  EnvironmentState{EnvironmentArgs: EnvironmentArgs{ProjectID: "project-1", Name: "staging"}, RailwayID: "environment-2"},
+		Inputs: EnvironmentArgs{ProjectID: "project-1", Name: "production"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "rename environment") {
+		t.Fatalf("rename failure must propagate, got %v", err)
+	}
+}

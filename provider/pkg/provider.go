@@ -102,6 +102,7 @@ func BuildProvider() (provider.Provider, error) {
 		WithResources(
 			infer.Resource(&Project{}),
 			infer.Resource(&Service{}),
+			infer.Resource(&Environment{}),
 			infer.Resource(&Variable{}),
 			infer.Resource(&CustomDomainResource{}),
 			infer.Resource(&Volume{}),
