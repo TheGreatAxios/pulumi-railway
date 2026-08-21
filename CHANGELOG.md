@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `railway.Environment` resource for named project environments.
+
 ## [0.1.0] - 2026-08-20
 
 Initial experimental release.
@@ -23,8 +27,8 @@ Initial experimental release.
 - The provider is experimental and implements a subset of Railway.
 - Only the TypeScript/Node.js SDK is published. Other Pulumi SDKs can be
   generated locally from the provider schema.
-- Environment management, deployment triggers, TCP proxies, Railway-provided
-  domains, and lookup functions are not yet implemented.
+- Deployment triggers, TCP proxies, Railway-provided domains, and lookup
+  functions are not yet implemented.
 - Live integration tests are not yet run in CI.
 
 [Unreleased]: https://github.com/thegreataxios/pulumi-railway/compare/v0.1.0...HEAD

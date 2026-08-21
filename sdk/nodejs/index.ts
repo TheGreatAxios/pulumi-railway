@@ -10,6 +10,11 @@ export type CustomDomain = import("./customDomain").CustomDomain;
 export const CustomDomain: typeof import("./customDomain").CustomDomain = null as any;
 utilities.lazyLoad(exports, ["CustomDomain"], () => require("./customDomain"));
 
+export { EnvironmentArgs } from "./environment";
+export type Environment = import("./environment").Environment;
+export const Environment: typeof import("./environment").Environment = null as any;
+utilities.lazyLoad(exports, ["Environment"], () => require("./environment"));
+
 export { ProjectArgs } from "./project";
 export type Project = import("./project").Project;
 export const Project: typeof import("./project").Project = null as any;
@@ -49,6 +54,8 @@ const _module = {
         switch (type) {
             case "railway:index:CustomDomain":
                 return new CustomDomain(name, <any>undefined, { urn })
+            case "railway:index:Environment":
+                return new Environment(name, <any>undefined, { urn })
             case "railway:index:Project":
                 return new Project(name, <any>undefined, { urn })
             case "railway:index:Service":

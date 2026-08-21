@@ -5,16 +5,16 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 An experimental native Pulumi provider for a subset of
-[Railway](https://railway.com): projects, services, environment variables,
-custom domains, and volumes. It provides CRUD, drift detection, import, and
-replacement semantics on immutable fields.
+[Railway](https://railway.com): projects, services, environments, environment
+variables, custom domains, and volumes. It provides CRUD, drift detection,
+import, and replacement semantics on immutable fields.
 
 ## Status
 
 This provider is pre-1.0 and is not listed in the Pulumi Registry. The
-TypeScript/Node.js SDK is the only SDK published as a package. Environment
-resources, deployment triggers, Railway-provided domains, TCP proxies, and
-lookup functions are not implemented yet.
+TypeScript/Node.js SDK is the only SDK published as a package. Deployment
+triggers, Railway-provided domains, TCP proxies, and lookup functions are not
+implemented yet.
 
 Go, Python, and .NET users can generate local SDKs from the installed plugin:
 
@@ -29,6 +29,7 @@ pulumi package gen-sdk railway --language dotnet
 | Resource | Description |
 | --- | --- |
 | `railway.Project` | Railway project and default environment |
+| `railway.Environment` | Named project environment (staging, previews) |
 | `railway.Service` | Service source and per-environment runtime configuration |
 | `railway.Variable` | Service or shared environment variable |
 | `railway.CustomDomain` | Custom domain, DNS verification, and certificate status |
@@ -128,6 +129,7 @@ then let Pulumi update it.
 
 ```bash
 pulumi import railway:index:Project project <project-id>
+pulumi import railway:index:Environment staging <project-id>/<environment-id>
 pulumi import railway:index:Service web <service-id>/<environment-id>
 pulumi import railway:index:Variable nodeEnv <project-id>/<environment-id>/<service-id>/<key>
 pulumi import railway:index:Variable shared <project-id>/<environment-id>//<key>

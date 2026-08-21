@@ -125,6 +125,7 @@ func TestProviderSchemaUsesPublicPackageShape(t *testing.T) {
 	for _, token := range []string{
 		"railway:index:Project",
 		"railway:index:Service",
+		"railway:index:Environment",
 		"railway:index:Variable",
 		"railway:index:CustomDomain",
 		"railway:index:Volume",
