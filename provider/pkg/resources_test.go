@@ -1204,3 +1204,468 @@ func TestEnvironmentUpdateRenameFailurePropagates(t *testing.T) {
 		t.Fatalf("rename failure must propagate, got %v", err)
 	}
 }
+
+// --- Bucket ---
+
+func TestBucketCreateCreatesDeploysAndFetchesCredentials(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch calls.Add(1) {
+		case 1:
+			if !strings.Contains(request.Query, "bucketCreate") {
+				t.Errorf("expected bucketCreate, got %s", request.Query)
+			}
+			input, _ := request.Variables["input"].(map[string]interface{})
+			if input["projectId"] != "project-1" {
+				t.Errorf("bucketCreate input = %#v", input)
+			}
+			if _, exists := input["name"]; exists {
+				t.Errorf("bucketCreate must omit name when unset: %#v", input)
+			}
+			writeGraphQL(t, w, map[string]interface{}{
+				"bucketCreate": map[string]interface{}{"id": "bucket-1", "name": "uploads-abc123"},
+			})
+		case 2:
+			if !strings.Contains(request.Query, "environmentPatchCommit") {
+				t.Errorf("expected environmentPatchCommit, got %s", request.Query)
+			}
+			if request.Variables["environmentId"] != "environment-1" {
+				t.Errorf("patch environmentId = %#v", request.Variables["environmentId"])
+			}
+			patch, _ := request.Variables["patch"].(map[string]interface{})
+			buckets, _ := patch["buckets"].(map[string]interface{})
+			instance, _ := buckets["bucket-1"].(map[string]interface{})
+			if instance["region"] != "sjc" || instance["isCreated"] != true {
+				t.Errorf("patch buckets.bucket-1 = %#v", instance)
+			}
+			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
+		case 3:
+			if !strings.Contains(request.Query, "bucketS3Credentials") {
+				t.Errorf("expected bucketS3Credentials, got %s", request.Query)
+			}
+			writeGraphQL(t, w, map[string]interface{}{
+				"bucketS3Credentials": []map[string]interface{}{
+					{
+						"accessKeyId":     "key-1",
+						"secretAccessKey": "secret-1",
+						"endpoint":        "https://storage.railway.app",
+						"bucketName":      "uploads-abc123",
+						"region":          "auto",
+						"urlStyle":        "virtual",
+					},
+				},
+			})
+		default:
+			t.Errorf("unexpected request %d", calls.Load())
+		}
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Bucket{}).Create(ctx, infer.CreateRequest[BucketArgs]{
+		Name:   "uploads",
+		Inputs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc"},
+	})
+	if err != nil {
+		t.Fatalf("bucket create failed: %v", err)
+	}
+	if response.ID != "bucket-1" {
+		t.Fatalf("bucket create ID = %q, want bucket-1", response.ID)
+	}
+	out := response.Output
+	if out.Name == nil || *out.Name != "uploads-abc123" {
+		t.Fatalf("bucket create name = %#v", out.Name)
+	}
+	if out.AccessKeyID != "key-1" || out.SecretAccessKey != "secret-1" ||
+		out.Endpoint != "https://storage.railway.app" || out.S3BucketName != "uploads-abc123" ||
+		out.S3Region != "auto" || out.URLStyle != "virtual" {
+		t.Fatalf("bucket create credentials = %#v", out)
+	}
+}
+
+func TestBucketCreatePartialStateWhenDeployFails(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch calls.Add(1) {
+		case 1:
+			writeGraphQL(t, w, map[string]interface{}{
+				"bucketCreate": map[string]interface{}{"id": "bucket-1", "name": "uploads"},
+			})
+		case 2:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"errors":[{"message":"environment has staged changes"}]}`))
+		default:
+			t.Errorf("unexpected request %d", calls.Load())
+		}
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Bucket{}).Create(ctx, infer.CreateRequest[BucketArgs]{
+		Name:   "uploads",
+		Inputs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "iad"},
+	})
+	var initErr infer.ResourceInitFailedError
+	if !errors.As(err, &initErr) {
+		t.Fatalf("expected ResourceInitFailedError, got %v", err)
+	}
+	if response.ID != "bucket-1" || response.Output.RailwayID != "bucket-1" {
+		t.Fatalf("partial response did not preserve bucket ID: %#v", response)
+	}
+}
+
+func TestBucketDeletePatchesWithIsDeleted(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "environmentPatchCommit") {
+			patch, _ := request.Variables["patch"].(map[string]interface{})
+			buckets, _ := patch["buckets"].(map[string]interface{})
+			instance, _ := buckets["bucket-1"].(map[string]interface{})
+			if instance["isDeleted"] != true {
+				t.Errorf("delete patch buckets.bucket-1 = %#v", instance)
+			}
+			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
+			return
+		}
+		if strings.Contains(request.Query, "projectBuckets") {
+			// Read-back after deletion: bucket is gone from the project.
+			writeGraphQL(t, w, map[string]interface{}{
+				"project": map[string]interface{}{
+					"buckets": map[string]interface{}{
+						"edges":    []map[string]interface{}{},
+						"pageInfo": map[string]interface{}{"hasNextPage": false, "endCursor": ""},
+					},
+				},
+			})
+			return
+		}
+		t.Errorf("unexpected API call: %s", request.Query)
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Bucket{}).Delete(ctx, infer.DeleteRequest[BucketState]{
+		ID: "bucket-1",
+		State: BucketState{
+			BucketArgs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc"},
+			RailwayID:  "bucket-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("bucket delete failed: %v", err)
+	}
+}
+
+func TestBucketUpdateRenamesAndRedeploys(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch calls.Add(1) {
+		case 1:
+			if !strings.Contains(request.Query, "bucketUpdate") {
+				t.Errorf("expected bucketUpdate, got %s", request.Query)
+			}
+			input, _ := request.Variables["input"].(map[string]interface{})
+			if input["name"] != "assets" {
+				t.Errorf("bucketUpdate input = %#v", input)
+			}
+			writeGraphQL(t, w, map[string]interface{}{
+				"bucketUpdate": map[string]interface{}{"id": "bucket-1", "name": "assets"},
+			})
+		case 2:
+			if !strings.Contains(request.Query, "environmentPatchCommit") {
+				t.Errorf("expected environmentPatchCommit, got %s", request.Query)
+			}
+			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
+		case 3:
+			writeGraphQL(t, w, map[string]interface{}{
+				"bucketS3Credentials": []map[string]interface{}{
+					{
+						"accessKeyId": "key-1", "secretAccessKey": "secret-1",
+						"endpoint": "https://storage.railway.app", "bucketName": "assets",
+						"region": "auto", "urlStyle": "virtual",
+					},
+				},
+			})
+		default:
+			t.Errorf("unexpected request %d", calls.Load())
+		}
+	}))
+	defer server.Close()
+
+	oldName := "uploads"
+	newName := "assets"
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Bucket{}).Update(ctx, infer.UpdateRequest[BucketArgs, BucketState]{
+		ID: "bucket-1",
+		State: BucketState{
+			BucketArgs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc", Name: &oldName},
+			RailwayID:  "bucket-1",
+		},
+		Inputs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc", Name: &newName},
+	})
+	if err != nil {
+		t.Fatalf("bucket update failed: %v", err)
+	}
+	if response.Output.Name == nil || *response.Output.Name != "assets" {
+		t.Fatalf("bucket update name = %#v", response.Output.Name)
+	}
+}
+
+func TestBucketReadResolvesProjectBucketAndRegion(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch calls.Add(1) {
+		case 1:
+			writeGraphQL(t, w, map[string]interface{}{
+				"project": map[string]interface{}{
+					"buckets": map[string]interface{}{
+						"edges": []map[string]interface{}{
+							{"node": map[string]interface{}{"id": "bucket-1", "name": "uploads"}},
+						},
+						"pageInfo": map[string]interface{}{"hasNextPage": false, "endCursor": ""},
+					},
+				},
+			})
+		case 2:
+			config := `{"buckets": {"bucket-1": {"region": "sjc", "isCreated": true}}}`
+			writeGraphQL(t, w, map[string]interface{}{
+				"environment": map[string]interface{}{"config": json.RawMessage(config)},
+			})
+		case 3:
+			writeGraphQL(t, w, map[string]interface{}{
+				"bucketS3Credentials": []map[string]interface{}{
+					{
+						"accessKeyId": "key-1", "secretAccessKey": "secret-1",
+						"endpoint": "https://storage.railway.app", "bucketName": "uploads",
+						"region": "auto", "urlStyle": "virtual",
+					},
+				},
+			})
+		default:
+			t.Errorf("unexpected request %d", calls.Load())
+		}
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Bucket{}).Read(ctx, infer.ReadRequest[BucketArgs, BucketState]{
+		ID:     "bucket-1",
+		Inputs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc"},
+		State:  BucketState{RailwayID: "bucket-1"},
+	})
+	if err != nil {
+		t.Fatalf("bucket read failed: %v", err)
+	}
+	if response.State.Region != "sjc" || response.State.Name == nil || *response.State.Name != "uploads" {
+		t.Fatalf("bucket read state = %#v", response.State)
+	}
+}
+
+func TestBucketReadReturnsEmptyWhenBucketMissingFromEnvironment(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch calls.Add(1) {
+		case 1:
+			writeGraphQL(t, w, map[string]interface{}{
+				"project": map[string]interface{}{
+					"buckets": map[string]interface{}{
+						"edges": []map[string]interface{}{
+							{"node": map[string]interface{}{"id": "bucket-1", "name": "uploads"}},
+						},
+						"pageInfo": map[string]interface{}{"hasNextPage": false, "endCursor": ""},
+					},
+				},
+			})
+		case 2:
+			// Bucket exists at project level but is not deployed to the env.
+			config := `{}`
+			writeGraphQL(t, w, map[string]interface{}{
+				"environment": map[string]interface{}{"config": json.RawMessage(config)},
+			})
+		default:
+			t.Errorf("unexpected request %d", calls.Load())
+		}
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Bucket{}).Read(ctx, infer.ReadRequest[BucketArgs, BucketState]{
+		ID:     "bucket-1",
+		Inputs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc"},
+		State:  BucketState{RailwayID: "bucket-1"},
+	})
+	if err != nil {
+		t.Fatalf("bucket read failed: %v", err)
+	}
+	if response.ID != "" {
+		t.Fatalf("bucket read should be empty when not deployed, got %#v", response)
+	}
+}
+
+func TestBucketCheckRejectsInvalidRegion(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("check must not call the API")
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Bucket{}).Check(ctx, infer.CheckRequest{
+		NewInputs: property.NewMap(map[string]property.Value{
+			"projectId":     property.New("project-1"),
+			"environmentId": property.New("environment-1"),
+			"region":        property.New("us-east-1"),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("bucket check failed: %v", err)
+	}
+	found := false
+	for _, failure := range response.Failures {
+		if failure.Property == "region" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a region failure, got %#v", response.Failures)
+	}
+}
+
+func TestBucketDeleteFailsWhenBucketStillExistsAfterPatch(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "environmentPatchCommit") {
+			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
+			return
+		}
+		if strings.Contains(request.Query, "projectBuckets") {
+			// Staged changes: the patch was acked but the bucket persists.
+			writeGraphQL(t, w, map[string]interface{}{
+				"project": map[string]interface{}{
+					"buckets": map[string]interface{}{
+						"edges": []map[string]interface{}{
+							{"node": map[string]interface{}{"id": "bucket-1", "name": "uploads"}},
+						},
+						"pageInfo": map[string]interface{}{"hasNextPage": false, "endCursor": ""},
+					},
+				},
+			})
+			return
+		}
+		t.Errorf("unexpected API call: %s", request.Query)
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	_, err := (&Bucket{}).Delete(ctx, infer.DeleteRequest[BucketState]{
+		ID: "bucket-1",
+		State: BucketState{
+			BucketArgs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc"},
+			RailwayID:  "bucket-1",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "still exists") {
+		t.Fatalf("delete must fail loudly when the bucket persists, got %v", err)
+	}
+}
+
+func TestBucketReadPaginatesProjectBuckets(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(request.Query, "projectBuckets") {
+			if strings.Contains(request.Query, "environmentConfig") {
+				config := `{"buckets": {"bucket-1": {"region": "sjc", "isCreated": true}}}`
+				writeGraphQL(t, w, map[string]interface{}{
+					"environment": map[string]interface{}{"config": json.RawMessage(config)},
+				})
+				return
+			}
+			if strings.Contains(request.Query, "bucketS3Credentials") {
+				writeGraphQL(t, w, map[string]interface{}{
+					"bucketS3Credentials": []map[string]interface{}{
+						{
+							"accessKeyId": "key-1", "secretAccessKey": "secret-1",
+							"endpoint": "https://storage.railway.app", "bucketName": "uploads",
+							"region": "auto", "urlStyle": "virtual",
+						},
+					},
+				})
+				return
+			}
+			t.Errorf("unexpected API call: %s", request.Query)
+			return
+		}
+		if request.Variables["after"] == nil {
+			writeGraphQL(t, w, map[string]interface{}{
+				"project": map[string]interface{}{
+					"buckets": map[string]interface{}{
+						"edges":    []map[string]interface{}{},
+						"pageInfo": map[string]interface{}{"hasNextPage": true, "endCursor": "buckets-1"},
+					},
+				},
+			})
+			return
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"project": map[string]interface{}{
+				"buckets": map[string]interface{}{
+					"edges": []map[string]interface{}{
+						{"node": map[string]interface{}{"id": "bucket-1", "name": "uploads"}},
+					},
+					"pageInfo": map[string]interface{}{"hasNextPage": false, "endCursor": ""},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Bucket{}).Read(ctx, infer.ReadRequest[BucketArgs, BucketState]{
+		ID:     "bucket-1",
+		Inputs: BucketArgs{ProjectID: "project-1", EnvironmentID: "environment-1", Region: "sjc"},
+		State:  BucketState{RailwayID: "bucket-1"},
+	})
+	if err != nil {
+		t.Fatalf("paginated bucket read failed: %v", err)
+	}
+	if response.State.Name == nil || *response.State.Name != "uploads" {
+		t.Fatalf("bucket after pagination was not found: %#v", response.State)
+	}
+}

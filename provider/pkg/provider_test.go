@@ -129,6 +129,7 @@ func TestProviderSchemaUsesPublicPackageShape(t *testing.T) {
 		"railway:index:Variable",
 		"railway:index:CustomDomain",
 		"railway:index:Volume",
+		"railway:index:Bucket",
 	} {
 		if _, exists := schema.Resources[token]; !exists {
 			t.Errorf("schema is missing %s", token)
