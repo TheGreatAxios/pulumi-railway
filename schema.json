@@ -401,6 +401,10 @@
     "railway:index:Service": {
       "description": "A Railway service and its configuration in one environment.",
       "properties": {
+        "autoUpdateType": {
+          "type": "string",
+          "description": "Automatic image update policy."
+        },
         "branch": {
           "type": "string",
           "description": "GitHub branch deployed by the service.",
@@ -419,10 +423,13 @@
           "type": "string",
           "description": "HTTP path Railway uses for health checks."
         },
+        "healthcheckTimeout": {
+          "type": "integer",
+          "description": "Health check timeout in seconds."
+        },
         "image": {
           "type": "string",
-          "description": "Docker image source.",
-          "replaceOnChanges": true
+          "description": "Docker image source."
         },
         "instanceId": {
           "type": "string",
@@ -434,7 +441,7 @@
         },
         "numReplicas": {
           "type": "integer",
-          "description": "Number of service replicas."
+          "description": "Number of service replicas. Zero means scaled to zero."
         },
         "projectId": {
           "type": "string",
@@ -471,6 +478,10 @@
         "instanceId"
       ],
       "inputProperties": {
+        "autoUpdateType": {
+          "type": "string",
+          "description": "Automatic image update policy: disabled, patch, or minor. Requires an image source from Docker Hub or GHCR."
+        },
         "branch": {
           "type": "string",
           "description": "GitHub branch to deploy. Valid only when repo is set.",
@@ -489,10 +500,13 @@
           "type": "string",
           "description": "HTTP path Railway uses for health checks."
         },
+        "healthcheckTimeout": {
+          "type": "integer",
+          "description": "Health check timeout in seconds. Railway defaults to 300."
+        },
         "image": {
           "type": "string",
-          "description": "Docker image source, for example redis:7-alpine. Mutually exclusive with repo.",
-          "replaceOnChanges": true
+          "description": "Docker image source, for example redis:7-alpine. Mutually exclusive with repo. Changing the image updates the service in place."
         },
         "name": {
           "type": "string",
@@ -500,7 +514,7 @@
         },
         "numReplicas": {
           "type": "integer",
-          "description": "Number of service replicas. Must be at least one."
+          "description": "Number of service replicas. Zero sends zero replicas to Railway; combining with Railway's serverless (App Sleep) feature is required to stop incurring usage while idle."
         },
         "projectId": {
           "type": "string",

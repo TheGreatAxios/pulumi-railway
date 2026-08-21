@@ -135,8 +135,11 @@ func TestProviderSchemaUsesPublicPackageShape(t *testing.T) {
 			t.Errorf("schema is missing %s", token)
 		}
 	}
-	if !schema.Resources["railway:index:Service"].InputProperties["image"].ReplaceOnChanges {
-		t.Error("service image must force replacement")
+	if schema.Resources["railway:index:Service"].InputProperties["image"].ReplaceOnChanges {
+		t.Error("service image must update in place (digest pinning must not replace services)")
+	}
+	if !schema.Resources["railway:index:Bucket"].InputProperties["region"].ReplaceOnChanges {
+		t.Error("bucket region is immutable and must force replacement")
 	}
 	if !schema.Resources["railway:index:Variable"].InputProperties["key"].ReplaceOnChanges {
 		t.Error("variable key must force replacement")

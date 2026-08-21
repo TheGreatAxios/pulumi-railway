@@ -2,6 +2,8 @@ package pkg
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -29,7 +31,7 @@ type ServiceArgs struct {
 	// Service name (as shown in Railway dashboard).
 	Name string `pulumi:"name"`
 	// Docker image source, e.g. "redis:7-alpine". Mutually exclusive with repo.
-	Image *string `pulumi:"image,optional" provider:"replaceOnChanges"`
+	Image *string `pulumi:"image,optional"`
 	// GitHub repo source, e.g. "owner/repo". Mutually exclusive with image.
 	Repo *string `pulumi:"repo,optional" provider:"replaceOnChanges"`
 	// GitHub branch (only with repo).
@@ -42,10 +44,16 @@ type ServiceArgs struct {
 	StartCommand *string `pulumi:"startCommand,optional"`
 	// Healthcheck path, e.g. "/health".
 	HealthcheckPath *string `pulumi:"healthcheckPath,optional"`
+	// Healthcheck timeout in seconds (Railway default 300).
+	HealthcheckTimeout *int `pulumi:"healthcheckTimeout,optional"`
 	// Region for the service instance.
 	Region *string `pulumi:"region,optional"`
-	// Number of replicas.
+	// Number of replicas. Setting 0 sends 0 replicas to Railway (see Railway's
+	// separate serverless/App Sleep feature for sleeping inactive services).
 	NumReplicas *int `pulumi:"numReplicas,optional"`
+	// Automatic image update policy for image sources: disabled, patch, or
+	// minor. Only supported for Docker Hub and GHCR images.
+	AutoUpdateType *string `pulumi:"autoUpdateType,optional"`
 }
 
 func (args *ServiceArgs) Annotate(a infer.Annotator) {
@@ -53,15 +61,17 @@ func (args *ServiceArgs) Annotate(a infer.Annotator) {
 	a.Describe(&args.ProjectID, "ID of the Railway project that owns the service.")
 	a.Describe(&args.EnvironmentID, "ID of the environment whose service instance is configured.")
 	a.Describe(&args.Name, "Service name shown in Railway.")
-	a.Describe(&args.Image, "Docker image source, for example redis:7-alpine. Mutually exclusive with repo.")
+	a.Describe(&args.Image, "Docker image source, for example redis:7-alpine. Mutually exclusive with repo. Changing the image updates the service in place.")
 	a.Describe(&args.Repo, "GitHub repository source in owner/repository form. Mutually exclusive with image.")
 	a.Describe(&args.Branch, "GitHub branch to deploy. Valid only when repo is set.")
 	a.Describe(&args.RootDirectory, "Root directory used as the build context.")
 	a.Describe(&args.BuildCommand, "Command Railway runs to build the service.")
 	a.Describe(&args.StartCommand, "Command Railway runs to start the service.")
 	a.Describe(&args.HealthcheckPath, "HTTP path Railway uses for health checks.")
+	a.Describe(&args.HealthcheckTimeout, "Health check timeout in seconds. Railway defaults to 300.")
 	a.Describe(&args.Region, "Railway region for the service instance.")
-	a.Describe(&args.NumReplicas, "Number of service replicas. Must be at least one.")
+	a.Describe(&args.NumReplicas, "Number of service replicas. Zero sends zero replicas to Railway; combining with Railway's serverless (App Sleep) feature is required to stop incurring usage while idle.")
+	a.Describe(&args.AutoUpdateType, "Automatic image update policy: disabled, patch, or minor. Requires an image source from Docker Hub or GHCR.")
 }
 
 type ServiceState struct {
@@ -84,8 +94,10 @@ func (state *ServiceState) Annotate(a infer.Annotator) {
 	a.Describe(&state.BuildCommand, "Command Railway runs to build the service.")
 	a.Describe(&state.StartCommand, "Command Railway runs to start the service.")
 	a.Describe(&state.HealthcheckPath, "HTTP path Railway uses for health checks.")
+	a.Describe(&state.HealthcheckTimeout, "Health check timeout in seconds.")
 	a.Describe(&state.Region, "Railway region for the service instance.")
-	a.Describe(&state.NumReplicas, "Number of service replicas.")
+	a.Describe(&state.NumReplicas, "Number of service replicas. Zero means scaled to zero.")
+	a.Describe(&state.AutoUpdateType, "Automatic image update policy.")
 	a.Describe(&state.RailwayID, "Immutable Railway service ID.")
 	a.Describe(&state.InstanceID, "Railway service instance ID for the configured environment.")
 }
@@ -121,9 +133,26 @@ func (*Service) Check(
 				Property: "branch", Reason: "branch requires repo",
 			})
 		}
-		if input.NumReplicas != nil && !isUnknown(inputs, "numReplicas") && *input.NumReplicas < 1 {
+		if input.NumReplicas != nil && !isUnknown(inputs, "numReplicas") && *input.NumReplicas < 0 {
 			failures = append(failures, provider.CheckFailure{
-				Property: "numReplicas", Reason: "numReplicas must be at least 1",
+				Property: "numReplicas", Reason: "numReplicas must not be negative",
+			})
+		}
+		if input.AutoUpdateType != nil && !isUnknown(inputs, "autoUpdateType") {
+			switch *input.AutoUpdateType {
+			case "disabled", "patch", "minor":
+			default:
+				failures = append(failures, provider.CheckFailure{
+					Property: "autoUpdateType",
+					Reason:   "autoUpdateType must be one of: disabled, patch, minor",
+				})
+			}
+		}
+		if input.AutoUpdateType != nil && input.Image == nil &&
+			!isUnknown(inputs, "autoUpdateType") && !isUnknown(inputs, "image") {
+			failures = append(failures, provider.CheckFailure{
+				Property: "autoUpdateType",
+				Reason:   "autoUpdateType requires an image source (Docker Hub or GHCR)",
 			})
 		}
 		return failures
@@ -187,7 +216,16 @@ func (*Service) Create(
 		}
 	}
 
-	// 3. Read the service instance to get its ID
+	// 3. Apply the auto-update policy when requested (environment config).
+	if input.AutoUpdateType != nil {
+		if err := applyServiceAutoUpdatePatch(ctx, client, serviceID, input.EnvironmentID, input.AutoUpdateType); err != nil {
+			return infer.CreateResponse[ServiceState]{ID: serviceID, Output: state}, infer.ResourceInitFailedError{
+				Reasons: []string{fmt.Sprintf("configure auto-update policy: %v", err)},
+			}
+		}
+	}
+
+	// 4. Read the service instance to get its ID
 	var instanceResult struct {
 		ServiceInstance struct {
 			ID string `json:"id"`
@@ -269,23 +307,26 @@ func (*Service) Read(
 	// Read service instance
 	var instanceResult struct {
 		ServiceInstance struct {
-			ID              string  `json:"id"`
-			StartCommand    *string `json:"startCommand"`
-			BuildCommand    *string `json:"buildCommand"`
-			RootDirectory   *string `json:"rootDirectory"`
-			HealthcheckPath *string `json:"healthcheckPath"`
-			Region          *string `json:"region"`
-			NumReplicas     *int    `json:"numReplicas"`
-			Source          *struct {
+			ID                 string  `json:"id"`
+			StartCommand       *string `json:"startCommand"`
+			BuildCommand       *string `json:"buildCommand"`
+			RootDirectory      *string `json:"rootDirectory"`
+			HealthcheckPath    *string `json:"healthcheckPath"`
+			HealthcheckTimeout *int    `json:"healthcheckTimeout"`
+			Region             *string `json:"region"`
+			NumReplicas        *int    `json:"numReplicas"`
+			Source             *struct {
 				Image *string `json:"image"`
 				Repo  *string `json:"repo"`
 			} `json:"source"`
 		} `json:"serviceInstance"`
 	}
 
+	// The ServiceSource output type only exposes image and repo; the
+	// auto-update policy is part of the environment config blob instead.
 	instanceQuery := `query serviceInstance($serviceId: String!, $environmentId: String!) {
   serviceInstance(serviceId: $serviceId, environmentId: $environmentId) {
-    id startCommand buildCommand rootDirectory healthcheckPath region numReplicas
+    id startCommand buildCommand rootDirectory healthcheckPath healthcheckTimeout region numReplicas
     source { image repo }
   }
 }`
@@ -306,12 +347,21 @@ func (*Service) Read(
 	state.BuildCommand = instanceResult.ServiceInstance.BuildCommand
 	state.RootDirectory = instanceResult.ServiceInstance.RootDirectory
 	state.HealthcheckPath = instanceResult.ServiceInstance.HealthcheckPath
+	state.HealthcheckTimeout = instanceResult.ServiceInstance.HealthcheckTimeout
 	state.Region = instanceResult.ServiceInstance.Region
 	state.NumReplicas = instanceResult.ServiceInstance.NumReplicas
 	if source := instanceResult.ServiceInstance.Source; source != nil {
 		state.Image = source.Image
 		state.Repo = source.Repo
 	}
+
+	// The auto-update policy is stored in the environment config, not the
+	// service instance output (ServiceSource has only image and repo).
+	policy, err := readServiceAutoUpdatePolicy(ctx, client, inputs.EnvironmentID, serviceID)
+	if err != nil {
+		return infer.ReadResponse[ServiceArgs, ServiceState]{}, fmt.Errorf("read auto-update policy: %w", err)
+	}
+	state.AutoUpdateType = policy
 
 	return infer.ReadResponse[ServiceArgs, ServiceState]{ID: serviceID, Inputs: state.ServiceArgs, State: state}, nil
 }
@@ -331,6 +381,19 @@ func (*Service) Update(
 		return infer.UpdateResponse[ServiceState]{}, err
 	}
 
+	// Removing an image is not supported: the API has no way to unset a
+	// source, and silently ignoring the removal would drift on refresh.
+	if state.Image != nil && input.Image == nil {
+		return infer.UpdateResponse[ServiceState]{}, fmt.Errorf(
+			"removing image is not supported; set a replacement image, or change projectId/environmentId to replace the service",
+		)
+	}
+
+	// A create that returned ResourceInitFailedError records partial state
+	// without an instance ID; the engine retries with an Update that must
+	// re-converge rather than diff against config that was never applied.
+	converge := state.InstanceID == ""
+
 	// Update service name if changed
 	if input.Name != state.Name {
 		mutation := `mutation serviceUpdate($id: String!, $input: ServiceUpdateInput!) {
@@ -345,12 +408,37 @@ func (*Service) Update(
 		}
 	}
 
-	// Update service instance config
-	if err := updateServiceInstance(ctx, client, req.ID, input.EnvironmentID, state.ServiceArgs, input, true); err != nil {
+	// Update service instance config. The converged path sends every set
+	// field (includeClears=false) instead of a delta, so a half-initialized
+	// service receives its full desired configuration.
+	if err := updateServiceInstance(ctx, client, req.ID, input.EnvironmentID, state.ServiceArgs, input, !converge); err != nil {
 		return infer.UpdateResponse[ServiceState]{}, fmt.Errorf("update service instance: %w", err)
 	}
 
+	// Auto-update policy lives in the environment config, not the instance
+	// update mutation, so converge it with a dedicated patch. On the
+	// converged path the policy is re-sent whenever one is desired, because
+	// the recorded partial state cannot prove it was ever applied.
+	if !equalPointers(state.AutoUpdateType, input.AutoUpdateType) || (converge && input.AutoUpdateType != nil) {
+		if err := applyServiceAutoUpdatePatch(ctx, client, req.ID, input.EnvironmentID, input.AutoUpdateType); err != nil {
+			return infer.UpdateResponse[ServiceState]{}, fmt.Errorf("update auto-update policy: %w", err)
+		}
+	}
+
 	state.ServiceArgs = input
+
+	if converge {
+		// Complete the initialization the failed create never finished so
+		// later updates can go back to diffing against real state.
+		instanceID, err := readServiceInstanceID(ctx, client, req.ID, input.EnvironmentID)
+		if err != nil {
+			return infer.UpdateResponse[ServiceState]{Output: state}, infer.ResourceInitFailedError{
+				Reasons: []string{fmt.Sprintf("read service instance after convergence: %v", err)},
+			}
+		}
+		state.InstanceID = instanceID
+	}
+
 	return infer.UpdateResponse[ServiceState]{Output: state}, nil
 }
 
@@ -390,8 +478,15 @@ func updateServiceInstance(
 	addOptionalString(instanceInput, "startCommand", old.StartCommand, input.StartCommand, includeClears)
 	addOptionalString(instanceInput, "rootDirectory", old.RootDirectory, input.RootDirectory, includeClears)
 	addOptionalString(instanceInput, "healthcheckPath", old.HealthcheckPath, input.HealthcheckPath, includeClears)
+	addOptionalInt(instanceInput, "healthcheckTimeout", old.HealthcheckTimeout, input.HealthcheckTimeout, includeClears)
 	addOptionalString(instanceInput, "region", old.Region, input.Region, includeClears)
 	addOptionalInt(instanceInput, "numReplicas", old.NumReplicas, input.NumReplicas, includeClears)
+
+	// Image changes update the source in place (no replacement); repo/branch
+	// still require replacement and never reach this path.
+	if !equalPointers(old.Image, input.Image) && input.Image != nil {
+		instanceInput["source"] = map[string]interface{}{"image": *input.Image}
+	}
 
 	if len(instanceInput) == 0 {
 		return nil
@@ -408,6 +503,105 @@ func updateServiceInstance(
 	}
 
 	return client.mutate(ctx, mutation, vars, nil)
+}
+
+// applyServiceAutoUpdatePatch converges the service's auto-update policy via
+// the environment config. The policy only accepts Docker Hub and GHCR image
+// sources; Railway validates that server-side.
+func applyServiceAutoUpdatePatch(
+	ctx context.Context, client *Client, serviceID, environmentID string, autoUpdateType *string,
+) error {
+	patchType := "disabled"
+	if autoUpdateType != nil {
+		patchType = *autoUpdateType
+	}
+	patch := map[string]interface{}{
+		"services": map[string]interface{}{
+			serviceID: map[string]interface{}{
+				"source": map[string]interface{}{
+					"autoUpdates": map[string]interface{}{"type": patchType},
+				},
+			},
+		},
+	}
+
+	mutation := `mutation environmentPatchCommit($environmentId: String!, $patch: EnvironmentConfig!, $commitMessage: String) {
+  environmentPatchCommit(environmentId: $environmentId, patch: $patch, commitMessage: $commitMessage)
+}`
+
+	return client.mutate(ctx, mutation, map[string]interface{}{
+		"environmentId": environmentID,
+		"patch":         patch,
+		"commitMessage": "Update service auto-update policy",
+	}, nil)
+}
+
+// readServiceAutoUpdatePolicy reads the service's auto-update type from the
+// environment config blob, where Railway stores services.<id>.source.autoUpdates.type.
+func readServiceAutoUpdatePolicy(
+	ctx context.Context, client *Client, environmentID, serviceID string,
+) (*string, error) {
+	var result struct {
+		Environment struct {
+			Config json.RawMessage `json:"config"`
+		} `json:"environment"`
+	}
+
+	query := `query environmentConfig($id: String!) {
+  environment(id: $id) { config }
+}`
+
+	if err := client.query(ctx, query, map[string]interface{}{"id": environmentID}, &result); err != nil {
+		return nil, err
+	}
+
+	var config struct {
+		Services map[string]struct {
+			Source *struct {
+				AutoUpdates *struct {
+					Type *string `json:"type"`
+				} `json:"autoUpdates"`
+			} `json:"source"`
+		} `json:"services"`
+	}
+	if len(result.Environment.Config) == 0 {
+		return nil, nil
+	}
+	if err := json.Unmarshal(result.Environment.Config, &config); err != nil {
+		return nil, fmt.Errorf("decode environment config: %w", err)
+	}
+
+	service, ok := config.Services[serviceID]
+	if !ok || service.Source == nil || service.Source.AutoUpdates == nil {
+		return nil, nil
+	}
+	return service.Source.AutoUpdates.Type, nil
+}
+
+// readServiceInstanceID fetches just the instance ID for convergence completion.
+func readServiceInstanceID(
+	ctx context.Context, client *Client, serviceID, environmentID string,
+) (string, error) {
+	var result struct {
+		ServiceInstance struct {
+			ID string `json:"id"`
+		} `json:"serviceInstance"`
+	}
+
+	query := `query serviceInstance($serviceId: String!, $environmentId: String!) {
+  serviceInstance(serviceId: $serviceId, environmentId: $environmentId) { id }
+}`
+
+	if err := client.query(ctx, query, map[string]interface{}{
+		"serviceId":     serviceID,
+		"environmentId": environmentID,
+	}, &result); err != nil {
+		return "", err
+	}
+	if result.ServiceInstance.ID == "" {
+		return "", errors.New("railway did not return the service instance")
+	}
+	return result.ServiceInstance.ID, nil
 }
 
 func addOptionalString(
