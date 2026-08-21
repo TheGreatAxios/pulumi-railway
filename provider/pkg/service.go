@@ -105,7 +105,7 @@ func (state *ServiceState) Annotate(a infer.Annotator) {
 func (*Service) Check(
 	ctx context.Context, req infer.CheckRequest,
 ) (infer.CheckResponse[ServiceArgs], error) {
-	return checkInputs(ctx, req, func(inputs property.Map, input ServiceArgs) []provider.CheckFailure {
+	response, err := checkInputs(ctx, req, func(inputs property.Map, input ServiceArgs) []provider.CheckFailure {
 		failures := appendFailures(
 			required(inputs, "projectId", input.ProjectID),
 			required(inputs, "environmentId", input.EnvironmentID),
@@ -149,7 +149,8 @@ func (*Service) Check(
 			}
 		}
 		if input.AutoUpdateType != nil && input.Image == nil &&
-			!isUnknown(inputs, "autoUpdateType") && !isUnknown(inputs, "image") {
+			!isUnknown(inputs, "autoUpdateType") && !isUnknown(inputs, "image") &&
+			*input.AutoUpdateType != "disabled" {
 			failures = append(failures, provider.CheckFailure{
 				Property: "autoUpdateType",
 				Reason:   "autoUpdateType requires an image source (Docker Hub or GHCR)",
@@ -157,12 +158,20 @@ func (*Service) Check(
 		}
 		return failures
 	})
+	if err != nil || len(response.Failures) > 0 {
+		return response, err
+	}
+	// "disabled" is the Railway default; store it as unset so refresh does
+	// not bounce between nil and "disabled".
+	response.Inputs.AutoUpdateType = normalizeAutoUpdateType(response.Inputs.AutoUpdateType)
+	return response, nil
 }
 
 func (*Service) Create(
 	ctx context.Context, req infer.CreateRequest[ServiceArgs],
 ) (infer.CreateResponse[ServiceState], error) {
 	input := req.Inputs
+	input.AutoUpdateType = normalizeAutoUpdateType(input.AutoUpdateType)
 	state := ServiceState{ServiceArgs: input}
 	if req.DryRun {
 		return infer.CreateResponse[ServiceState]{ID: req.Name, Output: state}, nil
@@ -217,6 +226,7 @@ func (*Service) Create(
 	}
 
 	// 3. Apply the auto-update policy when requested (environment config).
+	// "disabled" is normalized to unset above, so this only runs for patch/minor.
 	if input.AutoUpdateType != nil {
 		if err := applyServiceAutoUpdatePatch(ctx, client, serviceID, input.EnvironmentID, input.AutoUpdateType); err != nil {
 			return infer.CreateResponse[ServiceState]{ID: serviceID, Output: state}, infer.ResourceInitFailedError{
@@ -361,7 +371,7 @@ func (*Service) Read(
 	if err != nil {
 		return infer.ReadResponse[ServiceArgs, ServiceState]{}, fmt.Errorf("read auto-update policy: %w", err)
 	}
-	state.AutoUpdateType = policy
+	state.AutoUpdateType = normalizeAutoUpdateType(policy)
 
 	return infer.ReadResponse[ServiceArgs, ServiceState]{ID: serviceID, Inputs: state.ServiceArgs, State: state}, nil
 }
@@ -370,6 +380,7 @@ func (*Service) Update(
 	ctx context.Context, req infer.UpdateRequest[ServiceArgs, ServiceState],
 ) (infer.UpdateResponse[ServiceState], error) {
 	input := req.Inputs
+	input.AutoUpdateType = normalizeAutoUpdateType(input.AutoUpdateType)
 	state := req.State
 	if req.DryRun {
 		state.ServiceArgs = input
@@ -419,8 +430,9 @@ func (*Service) Update(
 	// update mutation, so converge it with a dedicated patch. On the
 	// converged path the policy is re-sent whenever one is desired, because
 	// the recorded partial state cannot prove it was ever applied.
-	if !equalPointers(state.AutoUpdateType, input.AutoUpdateType) || (converge && input.AutoUpdateType != nil) {
-		if err := applyServiceAutoUpdatePatch(ctx, client, req.ID, input.EnvironmentID, input.AutoUpdateType); err != nil {
+	desiredPolicy := normalizeAutoUpdateType(input.AutoUpdateType)
+	if !equalPointers(normalizeAutoUpdateType(state.AutoUpdateType), desiredPolicy) || (converge && desiredPolicy != nil) {
+		if err := applyServiceAutoUpdatePatch(ctx, client, req.ID, input.EnvironmentID, desiredPolicy); err != nil {
 			return infer.UpdateResponse[ServiceState]{}, fmt.Errorf("update auto-update policy: %w", err)
 		}
 	}
@@ -647,4 +659,13 @@ func equalPointers[T comparable](left, right *T) bool {
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+// normalizeAutoUpdateType treats Railway's default ("disabled") as unset so
+// omitted program inputs do not drift against refreshed state.
+func normalizeAutoUpdateType(value *string) *string {
+	if value == nil || *value == "" || *value == "disabled" {
+		return nil
+	}
+	return value
 }

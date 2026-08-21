@@ -1946,16 +1946,12 @@ func TestServiceUpdatePatchesAutoUpdatePolicy(t *testing.T) {
 
 func TestServiceUpdateClearsAutoUpdatePolicy(t *testing.T) {
 	t.Parallel()
-	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request capturedGraphQLRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		switch calls.Add(1) {
-		case 1:
-			writeGraphQL(t, w, map[string]interface{}{"serviceInstanceUpdate": true})
-		case 2:
+		if strings.Contains(request.Query, "environmentPatchCommit") {
 			patch, _ := request.Variables["patch"].(map[string]interface{})
 			services, _ := patch["services"].(map[string]interface{})
 			instance, _ := services["service-1"].(map[string]interface{})
@@ -1965,9 +1961,9 @@ func TestServiceUpdateClearsAutoUpdatePolicy(t *testing.T) {
 				t.Errorf("clear autoUpdates patch = %#v", patch)
 			}
 			writeGraphQL(t, w, map[string]interface{}{"environmentPatchCommit": true})
-		default:
-			t.Errorf("unexpected request %d", calls.Load())
+			return
 		}
+		t.Errorf("unexpected API call: %s", request.Query)
 	}))
 	defer server.Close()
 
@@ -2127,6 +2123,72 @@ func TestServiceReadPopulatesAutoUpdatePolicyFromEnvironmentConfig(t *testing.T)
 	}
 	if response.State.HealthcheckTimeout == nil || *response.State.HealthcheckTimeout != 60 {
 		t.Fatalf("read healthcheckTimeout = %#v", response.State.HealthcheckTimeout)
+	}
+}
+
+func TestServiceReadTreatsDisabledAutoUpdatePolicyAsUnset(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request capturedGraphQLRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if strings.Contains(request.Query, "query serviceInstance") {
+			writeGraphQL(t, w, map[string]interface{}{
+				"serviceInstance": map[string]interface{}{"id": "instance-1"},
+			})
+			return
+		}
+		if strings.Contains(request.Query, "environmentConfig") {
+			config := `{"services": {"service-1": {"source": {"autoUpdates": {"type": "disabled"}}}}}`
+			writeGraphQL(t, w, map[string]interface{}{
+				"environment": map[string]interface{}{"config": json.RawMessage(config)},
+			})
+			return
+		}
+		writeGraphQL(t, w, map[string]interface{}{
+			"service": map[string]interface{}{
+				"id": "service-1", "name": "web", "projectId": "project-1",
+			},
+		})
+	}))
+	defer server.Close()
+
+	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
+	response, err := (&Service{}).Read(ctx, infer.ReadRequest[ServiceArgs, ServiceState]{
+		ID:     "service-1",
+		Inputs: ServiceArgs{EnvironmentID: "environment-1"},
+		State:  ServiceState{RailwayID: "service-1"},
+	})
+	if err != nil {
+		t.Fatalf("service read failed: %v", err)
+	}
+	if response.State.AutoUpdateType != nil {
+		t.Fatalf("disabled autoUpdateType must read as unset, got %#v", response.State.AutoUpdateType)
+	}
+}
+
+func TestServiceCheckNormalizesDisabledAutoUpdateType(t *testing.T) {
+	t.Parallel()
+	image := property.New("gotenberg/gotenberg:8")
+	response, err := (&Service{}).Check(t.Context(), infer.CheckRequest{
+		Name: "gotenberg",
+		NewInputs: property.NewMap(map[string]property.Value{
+			"projectId":      property.New("project-1"),
+			"environmentId":  property.New("environment-1"),
+			"name":           property.New("gotenberg"),
+			"image":          image,
+			"autoUpdateType": property.New("disabled"),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if len(response.Failures) != 0 {
+		t.Fatalf("disabled autoUpdateType must be valid: %#v", response.Failures)
+	}
+	if response.Inputs.AutoUpdateType != nil {
+		t.Fatalf("disabled autoUpdateType must be stored as unset, got %#v", response.Inputs.AutoUpdateType)
 	}
 }
 

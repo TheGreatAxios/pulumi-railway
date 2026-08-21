@@ -10,6 +10,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `railway.Environment` resource for named project environments.
 - `railway.Bucket` resource for S3-compatible object storage.
+- Service in-place image updates, `healthcheckTimeout`, `numReplicas: 0`, and
+  `autoUpdateType`.
 
 ## [0.1.0] - 2026-08-20
 
