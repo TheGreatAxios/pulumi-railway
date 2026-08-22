@@ -111,7 +111,7 @@ func BuildProvider() (provider.Provider, error) {
 		WithLanguageMap(map[string]any{
 			"nodejs": map[string]any{
 				"packageName":          "@thegreataxios/pulumi-railway",
-				"packageDescription":   "Native Pulumi provider for Railway: projects, services, variables, custom domains, and volumes",
+				"packageDescription":   "Native Pulumi provider for Railway: projects, services, environments, variables, custom domains, volumes, and buckets",
 				"respectSchemaVersion": true,
 				"typescriptVersion":    "^5.9.2",
 				"dependencies":         map[string]string{"@pulumi/pulumi": "^3.142.0"},

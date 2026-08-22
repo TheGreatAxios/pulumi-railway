@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-21
+
 ### Added
 
 - `railway.Environment` resource for named project environments.
@@ -34,5 +36,6 @@ Initial experimental release.
   functions are not yet implemented.
 - Live integration tests are not yet run in CI.
 
-[Unreleased]: https://github.com/thegreataxios/pulumi-railway/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/thegreataxios/pulumi-railway/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/thegreataxios/pulumi-railway/releases/tag/v0.1.1
 [0.1.0]: https://github.com/thegreataxios/pulumi-railway/releases/tag/v0.1.0

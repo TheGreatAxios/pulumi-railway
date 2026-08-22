@@ -1,7 +1,7 @@
 {
     "name": "@thegreataxios/pulumi-railway",
     "version": "0.0.0-dev",
-    "description": "Native Pulumi provider for Railway: projects, services, variables, custom domains, and volumes",
+    "description": "Native Pulumi provider for Railway: projects, services, environments, variables, custom domains, volumes, and buckets",
     "keywords": [
         "pulumi",
         "pulumi-provider",

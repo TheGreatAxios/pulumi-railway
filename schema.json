@@ -29,7 +29,7 @@
       "dependencies": {
         "@pulumi/pulumi": "^3.142.0"
       },
-      "packageDescription": "Native Pulumi provider for Railway: projects, services, variables, custom domains, and volumes",
+      "packageDescription": "Native Pulumi provider for Railway: projects, services, environments, variables, custom domains, volumes, and buckets",
       "packageName": "@thegreataxios/pulumi-railway",
       "respectSchemaVersion": true,
       "typescriptVersion": "^5.9.2"
