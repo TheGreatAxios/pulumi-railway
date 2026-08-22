@@ -459,17 +459,21 @@ func TestProjectReadHydratesWorkspaceID(t *testing.T) {
 	}
 }
 
-func TestServiceReadHydratesBranch(t *testing.T) {
+func TestServiceReadDoesNotQueryBranchOnService(t *testing.T) {
 	t.Parallel()
+	branch := "main"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request capturedGraphQLRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
 		if strings.Contains(request.Query, "query service(") {
+			if strings.Contains(request.Query, "branch") {
+				t.Errorf("service read must not query Service.branch: %s", request.Query)
+			}
 			writeGraphQL(t, w, map[string]interface{}{
 				"service": map[string]interface{}{
-					"id": "service-1", "name": "web", "projectId": "project-1", "branch": "main",
+					"id": "service-1", "name": "web", "projectId": "project-1",
 				},
 			})
 			return
@@ -488,12 +492,16 @@ func TestServiceReadHydratesBranch(t *testing.T) {
 	ctx := contextWithClient(t.Context(), newClient(server.URL, "token", accountAuth, server.Client()))
 	response, err := (&Service{}).Read(ctx, infer.ReadRequest[ServiceArgs, ServiceState]{
 		ID: "service-1/environment-1",
+		State: ServiceState{ServiceArgs: ServiceArgs{
+			EnvironmentID: "environment-1",
+			Branch:        &branch,
+		}},
 	})
 	if err != nil {
 		t.Fatalf("read service: %v", err)
 	}
-	if response.Inputs.Branch == nil || *response.Inputs.Branch != "main" {
-		t.Fatalf("branch was not hydrated: %#v", response.Inputs)
+	if response.State.Branch == nil || *response.State.Branch != "main" {
+		t.Fatalf("branch from prior state was dropped: %#v", response.State)
 	}
 }
 

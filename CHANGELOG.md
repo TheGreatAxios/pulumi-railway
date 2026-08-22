@@ -6,6 +6,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Service read/refresh no longer queries `Service.branch`, which is not on
+  Railway's live GraphQL schema and broke `pulumi refresh`.
+
 ## [0.1.1] - 2026-08-21
 
 ### Added
