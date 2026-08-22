@@ -289,14 +289,15 @@ func (*Service) Read(
 
 	var result struct {
 		Service struct {
-			ID        string  `json:"id"`
-			Name      string  `json:"name"`
-			ProjectID string  `json:"projectId"`
-			Branch    *string `json:"branch"`
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			ProjectID string `json:"projectId"`
 		} `json:"service"`
 	}
 
-	query := `query service($id: String!) { service(id: $id) { id name projectId branch } }`
+	// Service has no branch field in the live GraphQL schema; branch lives on
+	// the GitHub source / create input. Keep the value from prior state.
+	query := `query service($id: String!) { service(id: $id) { id name projectId } }`
 
 	if err := client.query(ctx, query, map[string]interface{}{"id": serviceID}, &result); err != nil {
 		if isNotFound(err) {
@@ -312,7 +313,6 @@ func (*Service) Read(
 	state.Name = result.Service.Name
 	state.ProjectID = result.Service.ProjectID
 	state.EnvironmentID = inputs.EnvironmentID
-	state.Branch = result.Service.Branch
 
 	// Read service instance
 	var instanceResult struct {
